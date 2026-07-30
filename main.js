@@ -1,280 +1,277 @@
 const SOURCE_WORKBOOK_PATH = "./2물류통합재고목록.xlsm";
 
-const elements = {
-	reloadBtn: document.getElementById("reloadBtn"),
-	excelFileInput: document.getElementById("excelFileInput"),
-	fileInfo: document.getElementById("fileInfo"),
-	stats: document.getElementById("stats"),
-	sheetTabs: document.getElementById("sheetTabs"),
-	previewCount: document.getElementById("previewCount"),
-	excelWrap: document.getElementById("excelWrap"),
-	rowEditor: document.getElementById("rowEditor"),
-	addRowBtn: document.getElementById("addRowBtn"),
-	downloadBtn: document.getElementById("downloadBtn")
+const headers = [
+	"재고이관일",
+	"반입일",
+	"BL",
+	"내국관리번호",
+	"팔렛트 유형",
+	"품목",
+	"유통기한",
+	"팔렛트 보관료",
+	"사용 팔렛트 입고수량",
+	"반입수량(EA)",
+	"반입수량(PLT)",
+	"부족수량(SHORTAGE)/EA",
+	"파손수량(EA)",
+	"파손수량(PLT)",
+	"파손출고수량(EA)",
+	"출고가능수량(EA)",
+	"출고가능수량(PLT)",
+	"총재고수량(EA)",
+	"총재고수량(PLT)",
+	"전월까지총출고수량",
+	"당월출고수량",
+	"총출고수량",
+	"비고",
+	"적재수량(PLT당)",
+	"보관료발생일",
+	"프리타임",
+	"보관요율(팔렛트당)"
+];
+
+const defaultVisibleHeaders = new Set([
+	"반입일",
+	"BL",
+	"품목",
+	"총재고수량(EA)",
+	"총재고수량(PLT)",
+	"비고",
+	"적재수량(PLT당)"
+]);
+
+const app = document.getElementById("app");
+const state = {
+	workbook: null,
+	activeSheetName: "",
+	showAllColumns: false
 };
 
-let workbook = null;
-let activeSheetName = "";
-
-function formatNumber(value) {
-	return new Intl.NumberFormat("ko-KR").format(value);
+function getVisibleColumnIndexes() {
+	return headers.reduce((indexes, headerLabel, index) => {
+		if (state.showAllColumns || defaultVisibleHeaders.has(headerLabel)) {
+			indexes.push(index);
+		}
+		return indexes;
+	}, []);
 }
 
-function decodeRange(ref) {
-	if (!ref) {
-		return { rows: 0, cols: 0 };
-	}
-	const range = XLSX.utils.decode_range(ref);
-	return {
-		rows: range.e.r - range.s.r + 1,
-		cols: range.e.c - range.s.c + 1
-	};
+function normalizeText(value) {
+	return String(value ?? "")
+		.replace(/["']/g, "")
+		.replace(/\s+/g, "")
+		.trim();
 }
 
-function renderStats() {
-	if (!workbook) {
-		elements.stats.innerHTML = "";
-		return;
-	}
+function findHeaderRowIndex(rows) {
+	const targetSet = new Set(headers.map(normalizeText));
+	let bestIndex = -1;
+	let bestScore = 0;
 
-	const sheetNames = workbook.SheetNames || [];
-	let totalRows = 0;
-	let totalCols = 0;
-	let mergedCount = 0;
+	rows.forEach((row, rowIndex) => {
+		const score = new Set(
+			row
+				.map((cell) => normalizeText(cell))
+				.filter((normalized) => normalized && targetSet.has(normalized))
+		).size;
 
-	sheetNames.forEach((name) => {
-		const ws = workbook.Sheets[name];
-		const ref = ws["!ref"];
-		const size = decodeRange(ref);
-		totalRows += size.rows;
-		totalCols = Math.max(totalCols, size.cols);
-		mergedCount += (ws["!merges"] || []).length;
+		if (score > bestScore) {
+			bestScore = score;
+			bestIndex = rowIndex;
+		}
 	});
 
-	const cards = [
-		{ label: "시트 수", value: formatNumber(sheetNames.length) },
-		{ label: "총 행 범위", value: formatNumber(totalRows) },
-		{ label: "최대 열 범위", value: formatNumber(totalCols) },
-		{ label: "병합셀 수", value: formatNumber(mergedCount) }
-	];
-
-	elements.stats.innerHTML = cards
-		.map(
-			(item) =>
-				`<article class="stat-card"><div class="stat-label">${item.label}</div><div class="stat-value">${item.value}</div></article>`
-		)
-		.join("");
+	return bestScore > 0 ? bestIndex : -1;
 }
 
-function renderActiveSheet() {
-	if (!workbook || !activeSheetName) {
-		elements.previewCount.textContent = "표시할 시트가 없습니다.";
-		elements.excelWrap.innerHTML = "";
-		renderRowEditor();
-		return;
-	}
-
-	const ws = workbook.Sheets[activeSheetName];
-	if (!ws || !ws["!ref"]) {
-		elements.previewCount.textContent = `${activeSheetName} 시트 데이터 없음`;
-		elements.excelWrap.innerHTML = "";
-		renderRowEditor();
-		return;
-	}
-
-	const rangeInfo = decodeRange(ws["!ref"]);
-	elements.previewCount.textContent = `${activeSheetName} / ${formatNumber(rangeInfo.rows)}행 x ${formatNumber(
-		rangeInfo.cols
-	)}열`;
-
-	const html = XLSX.utils.sheet_to_html(ws, {
-		id: "excel-sheet",
-		editable: false
+function buildColumnMap(headerRow) {
+	return headers.map((headerLabel) => {
+		const normalizedLabel = normalizeText(headerLabel);
+		return headerRow.findIndex((cell) => normalizeText(cell) === normalizedLabel);
 	});
-	elements.excelWrap.innerHTML = html;
-	renderRowEditor();
 }
 
-function getSheetColumns(ws) {
-	if (!ws || !ws["!ref"]) {
+function extractSheetRows(sheetName) {
+	const ws = state.workbook?.Sheets?.[sheetName];
+	if (!ws) {
 		return [];
 	}
-	const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: "" });
-	const headerRow = rows[0] || [];
-	const colCount = decodeRange(ws["!ref"]).cols;
 
-	return Array.from({ length: colCount }, (_, idx) => {
-		const header = String(headerRow[idx] ?? "").trim();
-		return header || `열 ${idx + 1}`;
+	const rows = XLSX.utils.sheet_to_json(ws, {
+		header: 1,
+		defval: "",
+		blankrows: false,
+		raw: false
 	});
+	if (!rows.length) {
+		return [];
+	}
+
+	const headerRowIndex = findHeaderRowIndex(rows);
+	if (headerRowIndex < 0) {
+		return [];
+	}
+
+	const columnMap = buildColumnMap(rows[headerRowIndex]);
+	const dataRows = rows.slice(headerRowIndex + 1);
+
+	return dataRows
+		.map((row) =>
+			columnMap.map((columnIndex) => {
+				if (columnIndex < 0) {
+					return "";
+				}
+				return String(row[columnIndex] ?? "").trim();
+			})
+		)
+		.filter((row) => row.some((cell) => cell !== ""));
 }
 
-function renderRowEditor() {
-	if (!workbook || !activeSheetName) {
-		elements.rowEditor.innerHTML = '<p class="subtle">시트를 선택하면 입력 칸이 표시됩니다.</p>';
-		elements.addRowBtn.disabled = true;
-		elements.downloadBtn.disabled = true;
+function renderTable() {
+	if (!app || !state.workbook || !state.activeSheetName) {
 		return;
 	}
 
-	const ws = workbook.Sheets[activeSheetName];
-	const columns = getSheetColumns(ws);
-	if (!columns.length) {
-		elements.rowEditor.innerHTML = '<p class="subtle">현재 시트에 사용할 열 정보가 없습니다.</p>';
-		elements.addRowBtn.disabled = true;
-		elements.downloadBtn.disabled = false;
-		return;
-	}
-
-	elements.rowEditor.innerHTML = columns
+	const rows = extractSheetRows(state.activeSheetName);
+	const visibleColumnIndexes = getVisibleColumnIndexes();
+	const visibleHeaders = visibleColumnIndexes.map((index) => headers[index]);
+	const headHtml = visibleHeaders
 		.map(
-			(label, idx) =>
-				`<label class="field"><span>${label}</span><input type="text" data-col-index="${idx}" placeholder="${label} 값 입력" /></label>`
+			(label) =>
+				`<th class="toggle-header" title="클릭하여 ${state.showAllColumns ? "핵심 컬럼만" : "전체 컬럼"} 보기">${label}</th>`
 		)
 		.join("");
-	elements.addRowBtn.disabled = false;
-	elements.downloadBtn.disabled = false;
-}
+	const bodyHtml = rows.length
+		? rows
+				.map(
+					(row) =>
+						`<tr>${visibleColumnIndexes
+							.map((index) => {
+								const value = row[index] ?? "";
+								const isRemark = headers[index] === "비고";
+								const className = isRemark ? ' class="remark-cell"' : "";
+								const title = isRemark && value ? ` title="${value.replace(/"/g, "&quot;")}"` : "";
+								return `<td${className}${title}>${value}</td>`;
+							})
+							.join("")}</tr>`
+				)
+				.join("")
+		: `<tr><td class="empty" colspan="${visibleHeaders.length}">데이터가 없습니다.</td></tr>`;
 
-function addRowToActiveSheet() {
-	if (!workbook || !activeSheetName) {
-		return;
-	}
-
-	const ws = workbook.Sheets[activeSheetName];
-	const inputs = Array.from(elements.rowEditor.querySelectorAll("input[data-col-index]"));
-	if (!inputs.length) {
-		return;
-	}
-
-	const values = inputs.map((input) => input.value.trim());
-	const hasValue = values.some((value) => value !== "");
-	if (!hasValue) {
-		elements.fileInfo.textContent = "추가할 데이터를 한 칸 이상 입력해 주세요.";
-		return;
-	}
-
-	XLSX.utils.sheet_add_aoa(ws, [values], { origin: -1 });
-	inputs.forEach((input) => {
-		input.value = "";
-	});
-
-	elements.fileInfo.textContent = `${activeSheetName} 시트에 새 행이 추가되었습니다.`;
-	renderStats();
-	renderActiveSheet();
-}
-
-function downloadWorkbook() {
-	if (!workbook) {
-		return;
-	}
-	const dateTag = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-	const fileName = `물류통합재고목록_편집본_${dateTag}.xlsx`;
-	XLSX.writeFile(workbook, fileName, { bookType: "xlsx", compression: true });
-	elements.fileInfo.textContent = `${fileName} 파일로 저장을 시작했습니다.`;
-}
-
-async function loadWorkbookFromFile(file) {
-	if (!file) {
-		return;
-	}
-
-	try {
-		elements.fileInfo.textContent = `선택 파일 로딩 중: ${file.name}`;
-		const buffer = await file.arrayBuffer();
-		workbook = XLSX.read(buffer, {
-			type: "array",
-			cellStyles: true,
-			cellFormula: true,
-			cellNF: true,
-			cellDates: true
-		});
-
-		elements.fileInfo.textContent = `${file.name} 분석 완료 (${workbook.SheetNames.length}개 시트)`;
-		renderStats();
-		renderSheetTabs();
-		setActiveSheet(workbook.SheetNames[0] || "");
-	} catch (error) {
-		resetView(error.message || "선택한 엑셀 파일 파싱 중 오류가 발생했습니다.");
-	}
-}
-
-function setActiveSheet(sheetName) {
-	activeSheetName = sheetName;
-	Array.from(elements.sheetTabs.querySelectorAll(".sheet-tab")).forEach((button) => {
-		const isActive = button.dataset.sheet === sheetName;
-		button.classList.toggle("active", isActive);
-	});
-	renderActiveSheet();
-}
-
-function renderSheetTabs() {
-	if (!workbook) {
-		elements.sheetTabs.innerHTML = "";
-		return;
-	}
-
-	elements.sheetTabs.innerHTML = workbook.SheetNames.map(
-		(name) => `<button class="sheet-tab" data-sheet="${name}">${name}</button>`
+	const tabs = state.workbook.SheetNames.map(
+		(name) =>
+			`<button class="sheet-tab ${name === state.activeSheetName ? "active" : ""}" data-sheet="${name}">${name}</button>`
 	).join("");
 
-	Array.from(elements.sheetTabs.querySelectorAll(".sheet-tab")).forEach((button) => {
-		button.addEventListener("click", () => setActiveSheet(button.dataset.sheet));
+	app.innerHTML = `
+		<section class="table-section">
+			<div class="sheet-tabs">${tabs}</div>
+			<div class="table-wrap">
+				<table>
+					<thead>
+						<tr>${headHtml}</tr>
+					</thead>
+					<tbody>${bodyHtml}</tbody>
+				</table>
+			</div>
+		</section>
+	`;
+
+	Array.from(app.querySelectorAll(".sheet-tab")).forEach((button) => {
+		button.addEventListener("click", () => {
+			state.activeSheetName = button.dataset.sheet || "";
+			renderTable();
+		});
+	});
+
+	Array.from(app.querySelectorAll("th.toggle-header")).forEach((headerCell) => {
+		headerCell.addEventListener("click", () => {
+			state.showAllColumns = !state.showAllColumns;
+			renderTable();
+		});
+	});
+
+	const tableBody = app.querySelector("tbody");
+	if (!tableBody) {
+		return;
+	}
+
+	tableBody.addEventListener("click", (event) => {
+		const targetCell = event.target.closest("td");
+		if (!targetCell) {
+			return;
+		}
+
+		const targetRow = targetCell.closest("tr");
+		if (!targetRow) {
+			return;
+		}
+
+		const isEmptyRow = targetRow.querySelector("td.empty");
+		if (isEmptyRow) {
+			return;
+		}
+
+		Array.from(tableBody.querySelectorAll("tr.editing")).forEach((row) => {
+			row.classList.remove("editing");
+			Array.from(row.querySelectorAll("td")).forEach((cell) => {
+				cell.removeAttribute("contenteditable");
+			});
+		});
+
+		targetRow.classList.add("editing");
+		Array.from(targetRow.querySelectorAll("td")).forEach((cell) => {
+			cell.setAttribute("contenteditable", "true");
+		});
+
+		targetCell.focus();
+		const selection = window.getSelection();
+		const range = document.createRange();
+		range.selectNodeContents(targetCell);
+		range.collapse(false);
+		selection.removeAllRanges();
+		selection.addRange(range);
 	});
 }
 
-function resetView(message) {
-	workbook = null;
-	activeSheetName = "";
-	elements.fileInfo.textContent = message;
-	elements.stats.innerHTML = "";
-	elements.sheetTabs.innerHTML = "";
-	elements.previewCount.textContent = "표시할 시트가 없습니다.";
-	elements.excelWrap.innerHTML = "";
-	renderRowEditor();
+function renderMessage(message) {
+	if (!app) {
+		return;
+	}
+	app.innerHTML = `<section class="table-section"><p class="message">${message}</p></section>`;
 }
 
 async function loadWorkbook() {
+	if (!window.XLSX) {
+		renderMessage("XLSX 라이브러리를 불러오지 못했습니다.");
+		return;
+	}
+
 	try {
-		elements.fileInfo.textContent = `원본 파일 로딩 중: ${SOURCE_WORKBOOK_PATH}`;
 		const response = await fetch(encodeURI(SOURCE_WORKBOOK_PATH), { cache: "no-store" });
 		if (!response.ok) {
-			throw new Error(
-				`원본 파일을 찾을 수 없습니다. ${SOURCE_WORKBOOK_PATH} 파일을 프로젝트 루트에 배치하세요.`
-			);
+			throw new Error("루트 경로에서 엑셀 파일을 찾을 수 없습니다.");
 		}
 
 		const buffer = await response.arrayBuffer();
-		workbook = XLSX.read(buffer, {
+		state.workbook = XLSX.read(buffer, {
 			type: "array",
-			cellStyles: true,
-			cellFormula: true,
-			cellNF: true,
-			cellDates: true
+			cellDates: true,
+			raw: false
 		});
 
-		elements.fileInfo.textContent = `${SOURCE_WORKBOOK_PATH} 분석 완료 (${workbook.SheetNames.length}개 시트)`;
-		renderStats();
-		renderSheetTabs();
-		setActiveSheet(workbook.SheetNames[0] || "");
+		state.activeSheetName = state.workbook.SheetNames[0] || "";
+		if (!state.activeSheetName) {
+			renderMessage("워크북에 시트가 없습니다.");
+			return;
+		}
+
+		renderTable();
 	} catch (error) {
-		resetView(error.message || "엑셀 파일 파싱 중 오류가 발생했습니다.");
+		renderMessage(error.message || "엑셀 파일 로딩 중 오류가 발생했습니다.");
 	}
 }
 
-function bindEvents() {
-	elements.reloadBtn.addEventListener("click", loadWorkbook);
-	elements.excelFileInput.addEventListener("change", (event) => {
-		const [file] = event.target.files || [];
-		loadWorkbookFromFile(file);
-	});
-	elements.addRowBtn.addEventListener("click", addRowToActiveSheet);
-	elements.downloadBtn.addEventListener("click", downloadWorkbook);
-}
-
-function init() {
-	bindEvents();
+if (app) {
 	loadWorkbook();
 }
-
-init();
