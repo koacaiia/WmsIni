@@ -1,0 +1,272 @@
+:root {
+  --bg: #f2f5f8;
+  --panel: #ffffff;
+  --ink: #16202a;
+  --muted: #617282;
+  --line: #d8e1e8;
+  --accent: #146c94;
+  --accent-2: #0f4c64;
+  --chip: #e6f4fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 15% 10%, #dff4ff 0%, transparent 35%),
+    radial-gradient(circle at 90% 5%, #fff6df 0%, transparent 30%),
+    var(--bg);
+}
+
+.app {
+  width: min(1200px, 94vw);
+  margin: 26px auto 50px;
+  display: grid;
+  gap: 18px;
+}
+
+.hero {
+  background: linear-gradient(130deg, #0f4c64 0%, #146c94 45%, #28a3d5 100%);
+  color: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+}
+
+.hero h1 {
+  margin: 0 0 8px;
+}
+
+.hero p {
+  margin: 0;
+  opacity: 0.95;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 220px;
+}
+
+input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 14px;
+  background: #fff;
+}
+
+.actions {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.actions.wrap {
+  flex-wrap: wrap;
+}
+
+#excelFileInput {
+  display: none;
+}
+
+.file-pick {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.file-pick:hover {
+  background: #eef7fc;
+}
+
+button {
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--accent-2);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.subtle {
+  color: var(--muted);
+  margin: 6px 0 10px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stat-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fff 0%, #f8fbfd 100%);
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.stat-value {
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  background: var(--chip);
+  color: #0f4c64;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid #c9e6f4;
+}
+
+.sheet-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sheet-tab {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.sheet-tab.active {
+  border-color: var(--accent);
+  background: #daf2ff;
+  color: #0f4c64;
+}
+
+.row-editor {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.excel-wrap {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: auto;
+  max-height: 70vh;
+  background: #fff;
+}
+
+.excel-wrap table {
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.excel-wrap td,
+.excel-wrap th {
+  border: 1px solid #e5edf2;
+  padding: 5px 7px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.excel-wrap tr:nth-child(1) td,
+.excel-wrap tr:nth-child(1) th {
+  background: #f7fbff;
+}
+
+.table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 350px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+th,
+td {
+  border-bottom: 1px solid #eef2f5;
+  padding: 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  background: #f9fbfc;
+}
+
+@media (max-width: 900px) {
+  .grid,
+  .stats,
+  .row-editor {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WMS Inventory Web</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="hero">
+      <h1>물류 통합 재고 목록</h1>
+      <p>첨부된 xlsm 파일을 자동 분석하여 시트별 데이터, 컬럼 구성, 행 수를 웹에서 동일하게 확인합니다.</p>
+    </header>
+
+    <section class="panel">
+      <h2>원본 파일 분석</h2>
+      <div class="actions wrap">
+        <button id="reloadBtn">원본 파일 재분석</button>
+        <label class="file-pick" for="excelFileInput">엑셀 파일 열기</label>
+        <input id="excelFileInput" type="file" accept=".xlsx,.xlsm,.xls,.csv" />
+      </div>
+      <p id="fileInfo" class="subtle">원본 파일을 불러오는 중입니다.</p>
+    </section>
+
+    <section class="panel">
+      <h2>워크북 요약</h2>
+      <div id="stats" class="stats"></div>
+    </section>
+
+    <section class="panel">
+      <h2>시트 보기</h2>
+      <div id="sheetTabs" class="sheet-tabs"></div>
+      <p id="previewCount" class="subtle">표시할 시트가 없습니다.</p>
+      <div class="excel-wrap" id="excelWrap"></div>
+    </section>
+
+    <section class="panel">
+      <h2>자료 구성</h2>
+      <p class="subtle">현재 선택된 시트에 새 행을 추가하고 편집본을 다운로드할 수 있습니다.</p>
+      <div id="rowEditor" class="row-editor"></div>
+      <div class="actions wrap">
+        <button id="addRowBtn">현재 시트에 행 추가</button>
+        <button id="downloadBtn">편집본 엑셀 다운로드</button>
+      </div>
+      <p class="subtle">매크로가 있는 xlsm 원본도 편집본은 xlsx 형식으로 저장됩니다.</p>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
