@@ -166,6 +166,20 @@ function extractSheetRows(sheetName) {
 	return rows;
 }
 
+function getExistingItemValues() {
+	const itemIndex = headers.indexOf("품목");
+	const itemValues = new Set();
+
+	extractSheetRows(state.activeSheetName).forEach((row) => {
+		const itemValue = String(row?.[itemIndex] ?? "").trim();
+		if (itemValue) {
+			itemValues.add(itemValue);
+		}
+	});
+
+	return Array.from(itemValues);
+}
+
 function parseNumericCellValue(value) {
 	const raw = String(value ?? "").trim();
 	if (!raw) {
@@ -437,7 +451,7 @@ function renderSidePanelHtml() {
 			return `
 				<tr>
 					<th>${escapeHtml(header)}</th>
-					<td><input class="side-input" data-index="${index}" value="${escapeHtml(value)}" /></td>
+					<td><input class="side-input${header === "품목" ? " item-side-input" : ""}" data-index="${index}" data-field="${escapeAttribute(header)}" value="${escapeAttribute(value)}" /></td>
 				</tr>
 			`;
 		})
@@ -745,32 +759,86 @@ function renderTable() {
 	});
 
 	Array.from(app.querySelectorAll(".side-input")).forEach((input) => {
-		input.addEventListener("input", (event) => {
-			const targetInput = event.target;
-			const inputIndex = Number(targetInput.dataset.index);
-			if (!state.selectedRowData || Number.isNaN(inputIndex)) {
-				return;
-			}
+		if (input.classList.contains("item-side-input")) {
+			input.addEventListener("click", () => {
+				const currentValue = input.value;
+				const select = document.createElement("select");
+				select.className = input.className;
+				select.dataset.index = input.dataset.index;
+				select.dataset.field = input.dataset.field;
+				select.dataset.currentValue = currentValue;
 
-			const rowIndex = state.selectedRowData.rowIndex;
-			if (Number.isInteger(rowIndex) && rows[rowIndex]) {
-				rows[rowIndex][inputIndex] = targetInput.value;
-			}
+				const directInputOption = document.createElement("option");
+				directInputOption.value = "";
+				directInputOption.textContent = "직접입력";
+				select.appendChild(directInputOption);
 
-			state.selectedRowData.values[inputIndex] = targetInput.value;
+				getExistingItemValues().forEach((itemValue) => {
+					const option = document.createElement("option");
+					option.value = itemValue;
+					option.textContent = itemValue;
+					select.appendChild(option);
+				});
 
-			const mainTableRow = app.querySelector(`.app-main table tbody tr[data-row-index="${rowIndex}"]`);
-			if (mainTableRow) {
-				const visibleIndex = visibleColumnIndexes.indexOf(inputIndex);
-				if (visibleIndex >= 0) {
-					const cell = mainTableRow.querySelectorAll("td")[visibleIndex];
-					if (cell) {
-						cell.textContent = targetInput.value;
+				select.value = currentValue;
+				if (select.value !== currentValue) {
+					select.value = "";
+				}
+
+				input.replaceWith(select);
+				select.focus();
+				select.addEventListener("change", () => {
+					if (select.value !== "") {
+						updateSideInputValue(select);
+						return;
 					}
+
+					const directInput = document.createElement("input");
+					directInput.className = "side-input item-side-input";
+					directInput.dataset.index = select.dataset.index;
+					directInput.dataset.field = select.dataset.field;
+					directInput.value = select.dataset.currentValue || "";
+					select.replaceWith(directInput);
+					bindSideInput(directInput);
+					directInput.focus();
+				});
+			});
+		}
+		bindSideInput(input);
+	});
+
+	function updateSideInputValue(targetInput) {
+		const inputIndex = Number(targetInput.dataset.index);
+		if (!state.selectedRowData || Number.isNaN(inputIndex)) {
+			return;
+		}
+
+		const rowIndex = state.selectedRowData.rowIndex;
+		const value = targetInput.value;
+		if (Number.isInteger(rowIndex) && rows[rowIndex]) {
+			rows[rowIndex][inputIndex] = value;
+		}
+
+		state.selectedRowData.values[inputIndex] = value;
+
+		const mainTableRow = app.querySelector(`.app-main table tbody tr[data-row-index="${rowIndex}"]`);
+		if (mainTableRow) {
+			const visibleIndex = visibleColumnIndexes.indexOf(inputIndex);
+			if (visibleIndex >= 0) {
+				const cell = mainTableRow.querySelectorAll("td")[visibleIndex];
+				if (cell) {
+					cell.textContent = value;
 				}
 			}
+		}
+	}
+
+	function bindSideInput(input) {
+		input.addEventListener("input", (event) => {
+			const targetInput = event.target;
+			updateSideInputValue(targetInput);
 		});
-	});
+	}
 }
 
 function renderMessage(message) {
