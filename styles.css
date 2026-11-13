@@ -53,7 +53,7 @@ body {
 }
 
 .app-side.app-side-selected {
-  grid-template-rows: minmax(0, 0.5fr) minmax(0, 4.5fr) minmax(0, 5fr);
+  grid-template-rows: minmax(0, 0.5fr) minmax(0, 9fr) minmax(0, 0.5fr);
 }
 
 .app-side.app-side-ship {
@@ -62,6 +62,15 @@ body {
 
 .side-click-spacer {
   min-height: 0;
+}
+
+.side-title-action {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.side-title-action:hover {
+  color: #2a78b8;
 }
 
 .side-title-wrap {
@@ -99,6 +108,7 @@ body {
 }
 
 .side-table-wrap {
+  height: 100%;
   min-height: 0;
   overflow: auto;
 }
@@ -411,6 +421,11 @@ body {
   background: #eaf4ff;
   color: #1b5f95;
   font-weight: 700;
+}
+
+.sheet-add-tab {
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .table-section {

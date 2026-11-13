@@ -348,11 +348,24 @@ const shipViewHeaders = [
 	"비고"
 ];
 
+function createBlankSelectedRow() {
+	return {
+		rowIndex: null,
+		headers,
+		values: headers.map(() => "")
+	};
+}
+
+function isActiveSheetEmpty() {
+	return !state.activeSheetName || extractSheetRows(state.activeSheetName).length === 0;
+}
+
 function renderSidePanelHtml() {
 	if (!state.selectedRowData) {
+		const isEmptySheet = isActiveSheetEmpty();
 		return `
 			<div class="side-title-wrap">
-				<h3 class="side-title">재고 요약</h3>
+				<h3 class="side-title ${isEmptySheet ? "side-title-action" : ""}" ${isEmptySheet ? 'data-action="new-register"' : ""}>${isEmptySheet ? "신규등록" : "재고 요약"}</h3>
 			</div>
 			<div class="side-table-wrap" id="side-summary">
 				${renderSideSummaryHtml()}
@@ -445,13 +458,14 @@ function renderSidePanelHtml() {
 	}
 
 	const { headers: selectedHeaders, values: selectedValues } = state.selectedRowData;
-	const rowsHtml = selectedHeaders
-		.map((header, index) => {
+	const visibleColumnIndexes = getVisibleColumnIndexes();
+	const rowsHtml = visibleColumnIndexes
+		.map((index) => {
 			const value = selectedValues[index] ?? "";
 			return `
 				<tr>
 					<th>${escapeHtml(header)}</th>
-					<td><input class="side-input${header === "품목" ? " item-side-input" : ""}" data-index="${index}" data-field="${escapeAttribute(header)}" value="${escapeAttribute(value)}" /></td>
+					<td><input class="side-input" data-index="${index}" value="${escapeHtml(value)}" /></td>
 				</tr>
 			`;
 		})
@@ -524,10 +538,12 @@ function renderTable() {
 				.join("")
 		: `<tr><td class="empty" colspan="${visibleHeaders.length}">데이터가 없습니다.</td></tr>`;
 
-	const tabs = state.sheetNames.map(
-		(name) =>
-			`<button class="sheet-tab ${name === state.activeSheetName ? "active" : ""}" data-sheet="${name}">${name}</button>`
-	).join("");
+	const tabs = state.sheetNames
+		.map(
+			(name) =>
+				`<button class="sheet-tab ${name === state.activeSheetName ? "active" : ""}" data-sheet="${name}">${name}</button>`
+		)
+		.join("") + `<button class="sheet-tab sheet-add-tab" type="button" title="업체 추가(+)">업체추가(+)</button>`;
 	const sidePanelStateClass = !state.selectedRowData
 		? "app-side-summary"
 		: state.viewMode === "ship"
@@ -555,10 +571,39 @@ function renderTable() {
 		</div>
 	`;
 
-	Array.from(app.querySelectorAll(".sheet-tab")).forEach((button) => {
+	Array.from(app.querySelectorAll(".sheet-tab[data-sheet]")).forEach((button) => {
 		button.addEventListener("click", async () => {
 			state.activeSheetName = button.dataset.sheet || "";
+			state.selectedRowData = null;
+			state.viewMode = "edit";
 			await loadSheetRowsFromDatabase(state.activeSheetName, true);
+			renderTable();
+		});
+	});
+
+	Array.from(app.querySelectorAll(".sheet-add-tab")).forEach((button) => {
+		button.addEventListener("click", () => {
+			const inputName = window.prompt("추가할 업체명을 입력하세요.");
+			const sheetName = String(inputName ?? "").trim();
+			if (!sheetName) {
+				return;
+			}
+
+			if (!state.sheetNames.includes(sheetName)) {
+				state.sheetNames = [...state.sheetNames, sheetName];
+			}
+			state.sheetRowsByName[sheetName] = state.sheetRowsByName[sheetName] ?? [];
+			state.activeSheetName = sheetName;
+			state.selectedRowData = createBlankSelectedRow();
+			state.viewMode = "edit";
+			renderTable();
+		});
+	});
+
+	app.querySelectorAll('.side-title[data-action="new-register"]').forEach((title) => {
+		title.addEventListener("click", () => {
+			state.selectedRowData = createBlankSelectedRow();
+			state.viewMode = "edit";
 			renderTable();
 		});
 	});
