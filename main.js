@@ -58,10 +58,7 @@ const state = {
 	sheetNames: [],
 	sheetRowsByName: {},
 	activeSheetName: "",
-	showAllColumns: false,
-	selectedRowData: null,
-	viewMode: "edit",
-	attachments: []
+	showAllColumns: false
 };
 
 function sanitizeFirebaseFieldKey(fieldName) {
@@ -78,39 +75,9 @@ function escapeHtml(value) {
 		.replace(/'/g, "&#39;");
 }
 
-function escapeAttribute(value) {
-	return String(value ?? "")
-		.replace(/&/g, "&amp;")
-		.replace(/"/g, "&quot;");
-}
-
-function formatFileSize(bytes) {
-	if (!Number.isFinite(bytes) || bytes <= 0) {
-		return "0 B";
-	}
-	const units = ["B", "KB", "MB", "GB"];
-	let size = bytes;
-	let unitIndex = 0;
-	while (size >= 1024 && unitIndex < units.length - 1) {
-		size /= 1024;
-		unitIndex += 1;
-	}
-	return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
 function initFirebaseDatabase() {
 	const firebaseApp = initializeApp(firebaseConfig);
 	state.database = getDatabase(firebaseApp);
-}
-
-function getAttachmentPreviewMarkup(fileInfo) {
-	if (fileInfo.previewKind === "image" && fileInfo.previewUrl) {
-		return `<div class="attachment-preview-image" data-preview-name="${escapeAttribute(fileInfo.name)}" data-preview-type="image" data-preview-url="${escapeAttribute(fileInfo.previewUrl)}"><img src="${escapeAttribute(fileInfo.previewUrl)}" alt="${escapeAttribute(fileInfo.name)}" /></div>`;
-	}
-	if (fileInfo.previewText) {
-		return `<div class="attachment-preview-text" data-preview-name="${escapeAttribute(fileInfo.name)}" data-preview-type="text" data-preview-text="${escapeAttribute(fileInfo.previewText)}">${escapeHtml(fileInfo.previewText)}</div>`;
-	}
-	return `<div class="attachment-preview-text">미리보기 불가</div>`;
 }
 
 function getVisibleColumnIndexes() {
@@ -166,130 +133,6 @@ function extractSheetRows(sheetName) {
 	return rows;
 }
 
-function getExistingItemValues() {
-	const itemIndex = headers.indexOf("품목");
-	const itemValues = new Set();
-
-	extractSheetRows(state.activeSheetName).forEach((row) => {
-		const itemValue = String(row?.[itemIndex] ?? "").trim();
-		if (itemValue) {
-			itemValues.add(itemValue);
-		}
-	});
-
-	return Array.from(itemValues);
-}
-
-function parseNumericCellValue(value) {
-	const raw = String(value ?? "").trim();
-	if (!raw) {
-		return 0;
-	}
-
-	const numericTokens = raw
-		.replace(/,/g, "")
-		.match(/-?\d+(?:\.\d+)?/g);
-
-	if (!numericTokens || !numericTokens.length) {
-		return 0;
-	}
-
-	return numericTokens.reduce((sum, token) => {
-		const parsed = Number(token);
-		return Number.isFinite(parsed) ? sum + parsed : sum;
-	}, 0);
-}
-
-function buildSideSummaryStats(rows) {
-	const blIndex = headers.indexOf("BL");
-	const eaIndex = headers.indexOf("총재고수량(EA)");
-	const pltIndex = headers.indexOf("총재고수량(PLT)");
-	const summaryByBl = new Map();
-
-	rows.forEach((row) => {
-		if (!Array.isArray(row)) {
-			return;
-		}
-
-		const blValue = String(row[blIndex] ?? "").trim();
-		if (!blValue) {
-			return;
-		}
-
-		const eaValue = parseNumericCellValue(row[eaIndex]);
-		const pltValue = parseNumericCellValue(row[pltIndex]);
-		const existing = summaryByBl.get(blValue) || { bl: blValue, ea: 0, plt: 0 };
-		existing.ea += eaValue;
-		existing.plt += pltValue;
-		summaryByBl.set(blValue, existing);
-	});
-
-	const summaries = Array.from(summaryByBl.values());
-	const totals = summaries.reduce(
-		(acc, item) => {
-			acc.totalEa += item.ea;
-			acc.totalPlt += item.plt;
-			return acc;
-		},
-		{ totalEa: 0, totalPlt: 0 }
-	);
-
-	return {
-		summaries,
-		blCount: summaryByBl.size,
-		totalEa: totals.totalEa,
-		totalPlt: totals.totalPlt
-	};
-}
-
-function renderSideSummaryHtml() {
-	const rows = extractSheetRows(state.activeSheetName);
-	const stats = buildSideSummaryStats(rows);
-	const summaryRowsHtml = stats.summaries.length
-		? stats.summaries
-			.map(
-				(item) => `
-					<tr>
-						<td>${escapeHtml(item.bl)}</td>
-						<td>${item.ea.toLocaleString()}</td>
-						<td>${item.plt.toLocaleString()}</td>
-					</tr>
-				`
-			)
-			.join("")
-		: `
-				<tr>
-					<td colspan="3">데이터가 없습니다.</td>
-				</tr>
-		  `;
-
-	return `
-		<div class="side-summary-layout">
-			<div class="side-summary-table">
-				<table class="side-table">
-					<thead>
-						<tr>
-							<th>BL</th>
-							<th>EA</th>
-							<th>PLT</th>
-						</tr>
-					</thead>
-					<tbody>
-						${summaryRowsHtml}
-					</tbody>
-				</table>
-			</div>
-			<div class="side-summary-total">
-				<div class="side-summary-meta">
-					<p>총 BL 건수: ${stats.blCount.toLocaleString()}</p>
-					<p>total EA 수량: ${stats.totalEa.toLocaleString()}</p>
-					<p>total PLT 수량: ${stats.totalPlt.toLocaleString()}</p>
-				</div>
-			</div>
-		</div>
-	`;
-}
-
 function getRowValues(targetRow) {
 	return Array.from(targetRow.querySelectorAll("td")).map((cell) => String(cell.textContent ?? "").trim());
 }
@@ -336,158 +179,6 @@ async function loadSheetRowsFromDatabase(sheetName, forceReload = false) {
 	state.sheetRowsByName[sheetName] = parseRowsFromSheetNode(sheetSnapshot.val());
 }
 
-const shipViewHeaders = [
-	"반입일",
-	"BL",
-	"품목",
-	"총재고수량(EA)",
-	"총재고수량(PLT)",
-	"출고가능수량(EA)",
-	"출고가능수량(PLT)",
-	"적재수량(PLT당)",
-	"비고"
-];
-
-function createBlankSelectedRow() {
-	return {
-		rowIndex: null,
-		headers,
-		values: headers.map(() => "")
-	};
-}
-
-function isActiveSheetEmpty() {
-	return !state.activeSheetName || extractSheetRows(state.activeSheetName).length === 0;
-}
-
-function renderSidePanelHtml() {
-	if (!state.selectedRowData) {
-		const isEmptySheet = isActiveSheetEmpty();
-		return `
-			<div class="side-title-wrap">
-				<h3 class="side-title ${isEmptySheet ? "side-title-action" : ""}" ${isEmptySheet ? 'data-action="new-register"' : ""}>${isEmptySheet ? "신규등록" : "재고 요약"}</h3>
-			</div>
-			<div class="side-table-wrap" id="side-summary">
-				${renderSideSummaryHtml()}
-			</div>
-		`;
-	}
-
-	if (state.viewMode === "ship") {
-		const { headers: selectedHeaders, values: selectedValues } = state.selectedRowData;
-		const headerIndexMap = new Map(selectedHeaders.map((header, index) => [header, index]));
-		const getValue = (header) => {
-			const aliases = header === "부족수량(EA)" ? [header, "부족수량(SHORTAGE)/EA"] : [header];
-			for (const candidate of aliases) {
-				const index = headerIndexMap.get(candidate);
-				if (index !== undefined) {
-					return String(selectedValues[index] ?? "").trim();
-				}
-			}
-			return "";
-		};
-		const hasWarning = [getValue("부족수량(EA)"), getValue("부족수량(SHORTAGE)/EA"), getValue("파손수량(EA)")]
-			.some((value) => value !== "" && value.toUpperCase() !== "EA");
-		const shipRowsHtml = shipViewHeaders
-			.map((header) => {
-				const index = headerIndexMap.get(header);
-				const value = index !== undefined ? selectedValues[index] ?? "" : "";
-				const isWarningRow = hasWarning && (header === "출고가능수량(EA)" || header === "출고가능수량(PLT)");
-				return `
-					<tr class="${isWarningRow ? "ship-warning-row" : ""}">
-						<th>${escapeHtml(header)}</th>
-						<td>${escapeHtml(value)}</td>
-					</tr>
-				`;
-			})
-			.join("");
-
-		const attachmentRowsHtml = state.attachments.length
-			? state.attachments
-				.map((file) => `
-					<tr>
-						<td>${escapeHtml(file.name)}</td>
-						<td>${escapeHtml(formatFileSize(file.size))}</td>
-						<td>${getAttachmentPreviewMarkup(file)}</td>
-					</tr>
-				`)
-				.join("")
-			: `
-					<tr>
-						<td colspan="3">첨부파일이 없습니다.</td>
-					</tr>
-				`;
-
-		return `
-			<div class="side-title-wrap">
-				<h3 class="side-title">출고 등록 정보</h3>
-				<div class="side-actions">
-					<button class="side-action-btn" data-action="register">수정내용등록</button>
-					<button class="side-action-btn" data-action="ship">출고등록</button>
-				</div>
-			</div>
-			<div class="side-table-wrap">
-				<table class="side-table">
-					<tbody>${shipRowsHtml}</tbody>
-				</table>
-			</div>
-			<div class="ship-footer-grid">
-				<div class="ship-footer-section ship-footer-header">
-					<div class="ship-footer-title">첨부파일</div>
-					<div class="ship-footer-actions">
-						<label class="side-action-btn ship-attachment-label">
-							첨부파일 등록
-							<input class="ship-attachment-input" type="file" multiple hidden />
-						</label>
-					</div>
-				</div>
-				<div class="ship-footer-section ship-footer-preview">
-					<table class="ship-attachment-table">
-						<thead>
-							<tr>
-								<th>파일명</th>
-								<th>크기</th>
-								<th>미리보기</th>
-							</tr>
-						</thead>
-						<tbody>${attachmentRowsHtml}</tbody>
-					</table>
-				</div>
-			</div>
-		`;
-	}
-
-	const { headers: selectedHeaders, values: selectedValues } = state.selectedRowData;
-	const visibleColumnIndexes = getVisibleColumnIndexes();
-	const rowsHtml = visibleColumnIndexes
-		.map((index) => {
-			const value = selectedValues[index] ?? "";
-			return `
-				<tr>
-					<th>${escapeHtml(header)}</th>
-					<td><input class="side-input" data-index="${index}" value="${escapeHtml(value)}" /></td>
-				</tr>
-			`;
-		})
-		.join("");
-
-	return `
-		<div class="side-title-wrap">
-			<h3 class="side-title">선택된 행</h3>
-			<div class="side-actions">
-				<button class="side-action-btn" data-action="register">수정내용등록</button>
-				<button class="side-action-btn" data-action="ship">출고등록</button>
-			</div>
-		</div>
-		<div class="side-table-wrap">
-			<table class="side-table">
-				<tbody>${rowsHtml}</tbody>
-			</table>
-		</div>
-		<div class="side-click-spacer" aria-hidden="true"></div>
-	`;
-}
-
 function renderTable() {
 	if (!app || !state.sheetNames.length || !state.activeSheetName) {
 		return;
@@ -508,30 +199,25 @@ function renderTable() {
 	const bodyHtml = rows.length
 		? rows
 				.map((row, rowIndex) => {
-					const isSelectedRow = state.selectedRowData?.rowIndex === rowIndex;
 					const currentBlValue = blColumnIndex >= 0 ? String(row[blColumnIndex] ?? "").trim() : "";
 					const groupKey = currentBlValue || "__EMPTY__";
-					const rowBackgroundColor = isSelectedRow
-						? "#d9dde2"
-						: groupKey === "__EMPTY__"
-							? "#ffffff"
-							: (() => {
-									if (!blGroupColors.has(groupKey)) {
-										blGroupColors.set(groupKey, nextBlGroupIndex % 2 === 0 ? "#e9edf2" : "#ffffff");
-										nextBlGroupIndex += 1;
-									}
-									return blGroupColors.get(groupKey);
-								})();
-					const rowClass = isSelectedRow ? ' class="selected-row"' : "";
+					const rowBackgroundColor = groupKey === "__EMPTY__"
+						? "#ffffff"
+						: (() => {
+								if (!blGroupColors.has(groupKey)) {
+									blGroupColors.set(groupKey, nextBlGroupIndex % 2 === 0 ? "#e9edf2" : "#ffffff");
+									nextBlGroupIndex += 1;
+								}
+								return blGroupColors.get(groupKey);
+							})();
 					const rowStyle = ` style="background-color:${rowBackgroundColor};"`;
-					return `<tr data-row-index="${rowIndex}"${rowClass}${rowStyle}>${visibleColumnIndexes
+					return `<tr data-row-index="${rowIndex}"${rowStyle}>${visibleColumnIndexes
 						.map((index) => {
 							const value = row[index] ?? "";
 							const isRemark = headers[index] === "비고";
 							const className = isRemark ? ' class="remark-cell"' : "";
 							const title = isRemark && value ? ` title="${value.replace(/"/g, "&quot;")}"` : "";
-							const cellStyle = isSelectedRow ? ' style="background-color:#d9dde2;"' : ` style="background-color:${rowBackgroundColor};"`;
-							return `<td${className}${title}${cellStyle}>${value}</td>`;
+							return `<td${className}${title}${rowStyle}>${value}</td>`;
 						})
 						.join("")}</tr>`;
 				})
@@ -544,38 +230,25 @@ function renderTable() {
 				`<button class="sheet-tab ${name === state.activeSheetName ? "active" : ""}" data-sheet="${name}">${name}</button>`
 		)
 		.join("") + `<button class="sheet-tab sheet-add-tab" type="button" title="업체 추가(+)">업체추가(+)</button>`;
-	const sidePanelStateClass = !state.selectedRowData
-		? "app-side-summary"
-		: state.viewMode === "ship"
-			? "app-side-ship"
-			: "app-side-selected";
-
 	app.innerHTML = `
-		<div class="app-layout">
-			<section class="app-main">
-				<section class="table-section">
-					<div class="sheet-tabs">${tabs}</div>
-					<div class="table-wrap">
-						<table>
-							<thead>
-								<tr>${headHtml}</tr>
-							</thead>
-							<tbody>${bodyHtml}</tbody>
-						</table>
-					</div>
-				</section>
+		<section class="app-main">
+			<section class="table-section">
+				<div class="sheet-tabs">${tabs}</div>
+				<div class="table-wrap">
+					<table>
+						<thead>
+							<tr>${headHtml}</tr>
+						</thead>
+						<tbody>${bodyHtml}</tbody>
+					</table>
+				</div>
 			</section>
-			<aside class="app-side ${sidePanelStateClass}">
-				${renderSidePanelHtml()}
-			</aside>
-		</div>
+		</section>
 	`;
 
 	Array.from(app.querySelectorAll(".sheet-tab[data-sheet]")).forEach((button) => {
 		button.addEventListener("click", async () => {
 			state.activeSheetName = button.dataset.sheet || "";
-			state.selectedRowData = null;
-			state.viewMode = "edit";
 			await loadSheetRowsFromDatabase(state.activeSheetName, true);
 			renderTable();
 		});
@@ -594,16 +267,6 @@ function renderTable() {
 			}
 			state.sheetRowsByName[sheetName] = state.sheetRowsByName[sheetName] ?? [];
 			state.activeSheetName = sheetName;
-			state.selectedRowData = createBlankSelectedRow();
-			state.viewMode = "edit";
-			renderTable();
-		});
-	});
-
-	app.querySelectorAll('.side-title[data-action="new-register"]').forEach((title) => {
-		title.addEventListener("click", () => {
-			state.selectedRowData = createBlankSelectedRow();
-			state.viewMode = "edit";
 			renderTable();
 		});
 	});
@@ -614,276 +277,6 @@ function renderTable() {
 			renderTable();
 		});
 	});
-
-	const tableBody = app.querySelector(".app-main table tbody");
-	if (!tableBody) {
-		return;
-	}
-
-	tableBody.querySelectorAll("tr.selected-row").forEach((row) => row.classList.remove("selected-row"));
-
-	tableBody.addEventListener("click", (event) => {
-		const targetCell = event.target.closest("td");
-		if (!targetCell) {
-			return;
-		}
-
-		const targetRow = targetCell.closest("tr");
-		if (!targetRow) {
-			return;
-		}
-
-		const isEmptyRow = targetRow.querySelector("td.empty");
-		if (isEmptyRow) {
-			return;
-		}
-
-		const rowIndex = Number(targetRow.dataset.rowIndex);
-		if (Number.isNaN(rowIndex) || !rows[rowIndex]) {
-			return;
-		}
-
-		Array.from(tableBody.querySelectorAll("tr.selected-row")).forEach((row) => row.classList.remove("selected-row"));
-		targetRow.classList.add("selected-row");
-
-		const fullRowValues = rows[rowIndex] ? [...rows[rowIndex]] : [];
-		state.selectedRowData = {
-			rowIndex,
-			headers,
-			values: fullRowValues
-		};
-		window.lastClickedRowValues = fullRowValues;
-		renderTable();
-	});
-
-	Array.from(app.querySelectorAll(".side-action-btn")).forEach((button) => {
-		button.addEventListener("click", () => {
-			const action = button.dataset.action;
-			if (action === "register") {
-				state.viewMode = "edit";
-				renderTable();
-			} else if (action === "ship") {
-				state.viewMode = "ship";
-				renderTable();
-
-				if (!state.selectedRowData) {
-					window.alert("선택된 행이 없습니다.");
-					return;
-				}
-
-				const { headers: selectedHeaders, values: selectedValues } = state.selectedRowData;
-				const headerIndexMap = new Map(selectedHeaders.map((header, index) => [header, index]));
-				const getValue = (header) => {
-					const aliases = header === "부족수량(EA)" ? [header, "부족수량(SHORTAGE)/EA"] : [header];
-					for (const candidate of aliases) {
-						const index = headerIndexMap.get(candidate);
-						if (index !== undefined) {
-							return String(selectedValues[index] ?? "").trim();
-						}
-					}
-					return "";
-				};
-				const parseNumericValue = (header) => {
-					const rawValue = getValue(header);
-					if (!rawValue) {
-						return 0;
-					}
-					const normalized = rawValue.replace(/,/g, "").replace(/\s+/g, "");
-					const parsed = Number(normalized);
-					return Number.isNaN(parsed) ? 0 : parsed;
-				};
-
-				const totalEa = parseNumericValue("총재고수량(EA)");
-				const availableEa = parseNumericValue("출고가능수량(EA)");
-				const shortageRaw = getValue("부족수량(EA)");
-				const damageEaRaw = getValue("파손수량(EA)");
-				const shortage = parseNumericValue("부족수량(EA)");
-				const damageEa = parseNumericValue("파손수량(EA)");
-				const remarks = getValue("비고");
-
-				const warnings = [];
-				const hasShortage = shortageRaw !== "" && shortageRaw.toUpperCase() !== "EA";
-				const hasDamage = damageEaRaw !== "" && damageEaRaw.toUpperCase() !== "EA";
-				if (hasShortage) {
-					warnings.push(`출고 시 부족수량(EA): ${shortageRaw}`);
-				}
-				if (hasDamage) {
-					warnings.push(`출고 시 파손수량(EA): ${damageEaRaw}`);
-				}
-				if (remarks && (hasShortage || hasDamage)) {
-					warnings.push(`출고 관련 비고: ${remarks}`);
-				}
-
-				if (hasShortage || hasDamage) {
-					window.alert(`출고 등록 경고:\n${warnings.join("\n")}`);
-				}
-			}
-		});
-	});
-
-	const attachmentInput = app.querySelector(".ship-attachment-input");
-	if (attachmentInput) {
-		attachmentInput.addEventListener("change", async (event) => {
-			const files = Array.from(event.target.files || []);
-			const attachmentInfos = await Promise.all(files.map(async (file) => {
-				const attachmentInfo = {
-					name: file.name,
-					size: file.size,
-					type: file.type || "기타",
-					previewKind: "text",
-					previewText: "",
-					previewUrl: ""
-				};
-
-				if (file.type.startsWith("image/")) {
-					attachmentInfo.previewKind = "image";
-					attachmentInfo.previewUrl = URL.createObjectURL(file);
-					return attachmentInfo;
-				}
-
-				const isTextLike = file.type.startsWith("text/") || /\.(txt|csv|json|md|log|js|ts|html|css|xml)$/i.test(file.name);
-				if (isTextLike) {
-					try {
-						const text = await file.text();
-						attachmentInfo.previewText = text.slice(0, 240).replace(/\s+/g, " ").trim();
-					} catch (error) {
-						attachmentInfo.previewText = "파일 내용을 읽을 수 없습니다.";
-					}
-				}
-
-				return attachmentInfo;
-			}));
-
-			state.attachments = [...state.attachments, ...attachmentInfos];
-			renderTable();
-		});
-	}
-
-	app.querySelectorAll(".attachment-preview-text, .attachment-preview-image").forEach((preview) => {
-		preview.addEventListener("click", (event) => {
-			event.stopPropagation();
-			const previewName = preview.dataset.previewName || "첨부파일";
-			const previewType = preview.dataset.previewType || "text";
-			const previewText = preview.dataset.previewText || "";
-			const previewUrl = preview.dataset.previewUrl || "";
-			const modalHtml = `
-				<div class="attachment-modal-backdrop" role="presentation">
-					<div class="attachment-modal" role="dialog" aria-modal="true" aria-label="첨부파일 미리보기">
-						<div class="attachment-modal-header">
-							<strong>${escapeHtml(previewName)}</strong>
-							<button class="attachment-modal-close" type="button">닫기</button>
-						</div>
-						<div class="attachment-modal-body">
-							${previewType === "image" && previewUrl
-								? `<img src="${escapeAttribute(previewUrl)}" alt="${escapeAttribute(previewName)}" />`
-								: `<pre>${escapeHtml(previewText || "미리보기 내용이 없습니다.")}</pre>`}
-						</div>
-					</div>
-				</div>
-			`;
-			const existingModal = document.querySelector(".attachment-modal-backdrop");
-			if (existingModal) {
-				existingModal.remove();
-			}
-			document.body.insertAdjacentHTML("beforeend", modalHtml);
-			const closeButton = document.querySelector(".attachment-modal-close");
-			if (closeButton) {
-				closeButton.addEventListener("click", () => {
-					const modal = document.querySelector(".attachment-modal-backdrop");
-					if (modal) {
-						modal.remove();
-					}
-				});
-			}
-			document.querySelector(".attachment-modal-backdrop")?.addEventListener("click", (modalEvent) => {
-				if (modalEvent.target.classList.contains("attachment-modal-backdrop")) {
-					modalEvent.currentTarget.remove();
-				}
-			});
-		});
-	});
-
-	Array.from(app.querySelectorAll(".side-input")).forEach((input) => {
-		if (input.classList.contains("item-side-input")) {
-			input.addEventListener("click", () => {
-				const currentValue = input.value;
-				const select = document.createElement("select");
-				select.className = input.className;
-				select.dataset.index = input.dataset.index;
-				select.dataset.field = input.dataset.field;
-				select.dataset.currentValue = currentValue;
-
-				const directInputOption = document.createElement("option");
-				directInputOption.value = "";
-				directInputOption.textContent = "직접입력";
-				select.appendChild(directInputOption);
-
-				getExistingItemValues().forEach((itemValue) => {
-					const option = document.createElement("option");
-					option.value = itemValue;
-					option.textContent = itemValue;
-					select.appendChild(option);
-				});
-
-				select.value = currentValue;
-				if (select.value !== currentValue) {
-					select.value = "";
-				}
-
-				input.replaceWith(select);
-				select.focus();
-				select.addEventListener("change", () => {
-					if (select.value !== "") {
-						updateSideInputValue(select);
-						return;
-					}
-
-					const directInput = document.createElement("input");
-					directInput.className = "side-input item-side-input";
-					directInput.dataset.index = select.dataset.index;
-					directInput.dataset.field = select.dataset.field;
-					directInput.value = select.dataset.currentValue || "";
-					select.replaceWith(directInput);
-					bindSideInput(directInput);
-					directInput.focus();
-				});
-			});
-		}
-		bindSideInput(input);
-	});
-
-	function updateSideInputValue(targetInput) {
-		const inputIndex = Number(targetInput.dataset.index);
-		if (!state.selectedRowData || Number.isNaN(inputIndex)) {
-			return;
-		}
-
-		const rowIndex = state.selectedRowData.rowIndex;
-		const value = targetInput.value;
-		if (Number.isInteger(rowIndex) && rows[rowIndex]) {
-			rows[rowIndex][inputIndex] = value;
-		}
-
-		state.selectedRowData.values[inputIndex] = value;
-
-		const mainTableRow = app.querySelector(`.app-main table tbody tr[data-row-index="${rowIndex}"]`);
-		if (mainTableRow) {
-			const visibleIndex = visibleColumnIndexes.indexOf(inputIndex);
-			if (visibleIndex >= 0) {
-				const cell = mainTableRow.querySelectorAll("td")[visibleIndex];
-				if (cell) {
-					cell.textContent = value;
-				}
-			}
-		}
-	}
-
-	function bindSideInput(input) {
-		input.addEventListener("input", (event) => {
-			const targetInput = event.target;
-			updateSideInputValue(targetInput);
-		});
-	}
 }
 
 function renderMessage(message) {
