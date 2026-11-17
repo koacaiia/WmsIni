@@ -75,12 +75,17 @@ const state = {
 	scheduleRequestId: 0,
 	scheduleListMode: null,
 	scheduleSelection: new Map(),
-	scheduleRowRecords: new Map()
+	scheduleRowRecords: new Map(),
+	summaryTabOpen: false,
+	summary: { mode: "week", date: "", startDate: "", endDate: "", requestId: 0 }
 };
 
 const INCARGO_ROOT_PATH = "DeptName/WareHouseDept2/InCargo";
 const RECYCLEBIN_PATH = "DeptName/WareHouseDept2/recyclebin";
 const LIST_MODE_LABELS = { edit: "목록수정", delete: "목록삭제" };
+const SUMMARY_TAB_LABEL = "입고목록 요약";
+const SUMMARY_MODE_LABELS = { week: "주간", month: "월간", year: "연간", range: "기간검색" };
+const SUMMARY_WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
 const VIEW_TABS = [
 	{ id: "schedule", label: "스케줄" },
@@ -229,6 +234,43 @@ function closeRowEditPopup() {
 	document.querySelector(".row-edit-overlay")?.remove();
 }
 
+const SPEC_GROUPS = [
+	["20FT", "40FT", "LCL"],
+	["Pallet", "Bulk"],
+];
+
+function buildSpecFieldHtml(label, value) {
+	const selected = String(value ?? "").split(",").map((part) => part.trim());
+	const groupsHtml = SPEC_GROUPS.map(
+		(options, index) => `<div class="spec-option-group">${options
+			.map(
+				(option) =>
+					`<label><input type="radio" name="spec-group${index + 1}" value="${escapeHtml(option)}"${selected[index] === option ? " checked" : ""}> ${escapeHtml(option)}</label>`
+			)
+			.join("")}</div>`
+	).join("");
+	return `
+				<div class="row-edit-field spec-field" data-key="spec">
+					<span class="row-edit-label">${escapeHtml(label)}</span>
+					${groupsHtml}
+				</div>`;
+}
+
+function readSpecField(root) {
+	const parts = SPEC_GROUPS.map((_, index) => root.querySelector(`input[name="spec-group${index + 1}"]:checked`)?.value ?? "");
+	return parts.some(Boolean) ? parts.join(",") : "";
+}
+
+function collectFormValues(overlay) {
+	const values = Object.fromEntries(
+		Array.from(overlay.querySelectorAll(".row-edit-input[data-key]")).map((input) => [input.dataset.key, input.value.trim()])
+	);
+	if (overlay.querySelector(".spec-field")) {
+		values.spec = readSpecField(overlay);
+	}
+	return values;
+}
+
 function openNewRecordPopup() {
 	const fieldHeaders = Array.from(app.querySelectorAll(".schedule-table thead th[data-key]"));
 	if (!fieldHeaders.length || document.querySelector(".new-record-overlay")) {
@@ -238,6 +280,9 @@ function openNewRecordPopup() {
 	const fieldsHtml = fieldHeaders
 		.map((th) => {
 			const key = th.dataset.key;
+			if (key === "spec") {
+				return buildSpecFieldHtml(th.textContent.trim(), "");
+			}
 			const value = key === "date" ? today : "";
 			return `
 				<label class="row-edit-field">
@@ -284,10 +329,7 @@ function openNewRecordPopup() {
 	const messageEl = overlay.querySelector(".new-record-message");
 	const items = [];
 
-	const collectForm = () =>
-		Object.fromEntries(
-			Array.from(overlay.querySelectorAll(".row-edit-input[data-key]")).map((input) => [input.dataset.key, input.value.trim()])
-		);
+	const collectForm = () => collectFormValues(overlay);
 	const getBatch = () => {
 		const field = overlay.querySelector('input[name="new-list-type"]:checked')?.value;
 		const count = Number(countInput.value);
@@ -499,12 +541,17 @@ function renderTable() {
 				</div>
 			</section>
 		</section>`
-		: `<section class="app-schedule"></section>`;
+		: state.activeView === "summary"
+			? `<section class="app-summary"></section>`
+			: `<section class="app-schedule"></section>`;
+	const summaryTabHtml = state.summaryTabOpen
+		? `<button class="sheet-tab view-tab ${state.activeView === "summary" ? "active" : ""}" type="button" data-view="summary">${SUMMARY_TAB_LABEL}</button>`
+		: "";
 	const yearPickerHtml = state.activeView === "schedule"
-		? `<label class="year-picker">년도 <select class="year-select" aria-label="년도 선택">${buildYearOptionsHtml()}</select></label><button type="button" class="new-record-btn">신규자료+</button><button type="button" class="list-mode-btn" data-mode="edit">목록수정</button><button type="button" class="list-mode-btn" data-mode="delete">목록삭제</button><span class="list-mode-bar" hidden><span class="list-mode-count"></span><button type="button" class="list-complete-btn">선택 완료</button><button type="button" class="list-cancel-btn">선택 취소</button></span>`
+		? `<label class="year-picker">년도 <select class="year-select" aria-label="년도 선택">${buildYearOptionsHtml()}</select></label><button type="button" class="new-record-btn">신규자료+</button><button type="button" class="list-mode-btn" data-mode="edit">목록수정</button><button type="button" class="list-mode-btn" data-mode="delete">목록삭제</button><button type="button" class="summary-open-btn">입고요약</button>`
 		: "";
 	app.innerHTML = `
-		<div class="view-tabs">${viewTabsHtml}${yearPickerHtml}</div>
+		<div class="view-tabs">${viewTabsHtml}${summaryTabHtml}${yearPickerHtml}</div>
 		${contentHtml}
 	`;
 
@@ -514,9 +561,12 @@ function renderTable() {
 		app.querySelectorAll(".list-mode-btn").forEach((button) => {
 			button.addEventListener("click", () => setListMode(button.dataset.mode));
 		});
-		app.querySelector(".list-complete-btn")?.addEventListener("click", completeListAction);
-		app.querySelector(".list-cancel-btn")?.addEventListener("click", () => setListMode(null));
 		updateListModeControls();
+	}
+
+	app.querySelector(".summary-open-btn")?.addEventListener("click", openSummaryTab);
+	if (state.activeView === "summary") {
+		loadSummaryView();
 	}
 
 	Array.from(app.querySelectorAll(".view-tab[data-view]")).forEach((button) => {
@@ -727,11 +777,14 @@ function getScheduleRecordDate(record) {
 	return dateMatch ? dateMatch[0] : "";
 }
 
+function formatDateString(date) {
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `${date.getFullYear()}-${month}-${day}`;
+}
+
 function getTodayDateString() {
-	const now = new Date();
-	const month = String(now.getMonth() + 1).padStart(2, "0");
-	const day = String(now.getDate()).padStart(2, "0");
-	return `${now.getFullYear()}-${month}-${day}`;
+	return formatDateString(new Date());
 }
 
 function renderScheduleRows(records, scrollToToday) {
@@ -920,11 +973,10 @@ function updateListModeControls() {
 	app.querySelectorAll(".list-mode-btn").forEach((button) => {
 		button.classList.toggle("active", button.dataset.mode === mode);
 	});
-	const bar = app.querySelector(".list-mode-bar");
-	if (bar) {
-		bar.hidden = !mode;
-		bar.querySelector(".list-mode-count").textContent = `${LIST_MODE_LABELS[mode] ?? ""} 선택 ${state.scheduleSelection.size}건`;
-	}
+	const countText = `${LIST_MODE_LABELS[mode] ?? ""} 선택 ${state.scheduleSelection.size}건`;
+	const panel = ensureListActionPanel();
+	panel.hidden = !mode;
+	panel.querySelector(".list-action-count").textContent = countText;
 }
 
 function setListMode(mode) {
@@ -950,35 +1002,24 @@ function handleScheduleSelect(radio) {
 	state.scheduleSelection.set(path, record);
 	radio.checked = true;
 	updateListModeControls();
-	openListActionPopup();
 }
 
-function openListActionPopup() {
-	document.querySelector(".list-action-overlay")?.remove();
-	const label = LIST_MODE_LABELS[state.scheduleListMode];
-	const overlay = document.createElement("div");
-	overlay.className = "row-edit-overlay list-action-overlay";
-	overlay.innerHTML = `
-		<div class="row-edit-popup list-action-popup" role="dialog" aria-modal="true" aria-label="${label}">
-			<header class="row-edit-header">${label}</header>
-			<div class="row-edit-body">
-				<p class="list-action-count">선택 ${state.scheduleSelection.size}건</p>
-			</div>
-			<footer class="row-edit-footer">
-				<button type="button" class="list-action-add">추가선택</button>
-				<button type="button" class="row-edit-save list-action-complete">선택 완료</button>
-			</footer>
-		</div>
-	`;
-	document.body.append(overlay);
-	overlay.addEventListener("click", (event) => {
-		if (event.target.closest(".list-action-complete")) {
-			overlay.remove();
-			completeListAction();
-		} else if (event.target === overlay || event.target.closest(".list-action-add")) {
-			overlay.remove();
-		}
-	});
+function ensureListActionPanel() {
+	let panel = document.querySelector(".list-action-panel");
+	if (!panel) {
+		panel = document.createElement("div");
+		panel.className = "list-action-panel";
+		panel.hidden = true;
+		panel.innerHTML = `<span class="list-action-count"></span><button type="button" class="list-action-cancel">취소</button><button type="button" class="list-action-complete">선택 완료</button>`;
+		panel.querySelector(".list-action-cancel").addEventListener("click", cancelListMode);
+		panel.querySelector(".list-action-complete").addEventListener("click", completeListAction);
+		document.body.append(panel);
+	}
+	return panel;
+}
+
+function cancelListMode() {
+	setListMode(null);
 }
 
 async function moveScheduleRecordToRecycleBin(record) {
@@ -994,6 +1035,9 @@ function openScheduleEditPopup(record, sequence) {
 	const fieldsHtml = Array.from(app.querySelectorAll(".schedule-table thead th[data-key]"))
 		.map((th) => {
 			const key = th.dataset.key;
+			if (key === "spec") {
+				return buildSpecFieldHtml(th.textContent.trim(), data.spec);
+			}
 			return `
 				<label class="row-edit-field">
 					<span class="row-edit-label">${escapeHtml(th.textContent.trim())}</span>
@@ -1027,9 +1071,7 @@ function openScheduleEditPopup(record, sequence) {
 			if (event.target === overlay || event.target.closest(".edit-record-cancel")) {
 				close(null);
 			} else if (event.target.closest(".edit-record-save")) {
-				const form = Object.fromEntries(
-					Array.from(overlay.querySelectorAll(".row-edit-input")).map((input) => [input.dataset.key, input.value.trim()])
-				);
+				const form = collectFormValues(overlay);
 				const values = { ...data, ...form };
 				const error = getScheduleRecordError(values);
 				if (error) {
@@ -1161,6 +1203,295 @@ async function loadScheduleView() {
 	} catch (error) {
 		if (!isStale()) {
 			showMessage(error.message || "스케줄 데이터 로딩 중 오류가 발생했습니다.");
+		}
+	}
+}
+
+function parseDateString(dateString) {
+	const [year, month, day] = dateString.split("-").map(Number);
+	return new Date(year, month - 1, day);
+}
+
+function shiftDateString(dateString, days) {
+	const date = parseDateString(dateString);
+	date.setDate(date.getDate() + days);
+	return formatDateString(date);
+}
+
+function getSummaryRange() {
+	const { mode, date, startDate, endDate } = state.summary;
+	if (mode === "range") {
+		return { start: startDate, end: endDate, label: `${startDate} ~ ${endDate}` };
+	}
+	const base = parseDateString(date);
+	if (mode === "week") {
+		const start = shiftDateString(date, -((base.getDay() + 6) % 7));
+		const end = shiftDateString(start, 5);
+		return { start, end, label: `${start} ~ ${end}` };
+	}
+	if (mode === "month") {
+		const year = base.getFullYear();
+		const month = base.getMonth();
+		return {
+			start: formatDateString(new Date(year, month, 1)),
+			end: formatDateString(new Date(year, month + 1, 0)),
+			label: `${year}-${String(month + 1).padStart(2, "0")}`
+		};
+	}
+	return { start: `${base.getFullYear()}-01-01`, end: `${base.getFullYear()}-12-31`, label: `${base.getFullYear()}년` };
+}
+
+function shiftSummaryDate(delta) {
+	const { mode, date } = state.summary;
+	const base = parseDateString(date);
+	if (mode === "week") {
+		state.summary.date = shiftDateString(date, delta * 7);
+	} else if (mode === "month") {
+		state.summary.date = formatDateString(new Date(base.getFullYear(), base.getMonth() + delta, 1));
+	} else if (mode === "year") {
+		state.summary.date = formatDateString(new Date(base.getFullYear() + delta, 0, 1));
+	}
+}
+
+async function loadSummaryRecords(startDate, endDate) {
+	const monthCursor = parseDateString(startDate);
+	monthCursor.setDate(1);
+	const lastDate = parseDateString(endDate);
+	const requests = [];
+	while (monthCursor <= lastDate) {
+		const year = String(monthCursor.getFullYear());
+		const month = String(monthCursor.getMonth() + 1).padStart(2, "0");
+		requests.push(loadScheduleMonthRecords(year, month));
+		monthCursor.setMonth(monthCursor.getMonth() + 1);
+	}
+	const records = (await Promise.all(requests)).flat();
+	return records
+		.filter((record) => {
+			const date = getScheduleRecordDate(record);
+			return date >= startDate && date <= endDate;
+		})
+		.sort(
+			(a, b) =>
+				getScheduleRecordDate(a).localeCompare(getScheduleRecordDate(b)) ||
+				String(a.consignee ?? "").localeCompare(String(b.consignee ?? ""), "ko")
+		);
+}
+
+function groupRecordsByDate(records) {
+	const groups = new Map();
+	records.forEach((record) => {
+		const date = getScheduleRecordDate(record);
+		groups.set(date, [...(groups.get(date) ?? []), record]);
+	});
+	return groups;
+}
+
+function isBlankOrZero(value) {
+	const text = String(value ?? "").trim();
+	return text === "" || text === "0";
+}
+
+function hasNonZeroContainer(record) {
+	return !isBlankOrZero(record.container20) || !isBlankOrZero(record.container40);
+}
+
+function getSummarySpec(record) {
+	if (String(record.container20 ?? "").trim() === "0" && String(record.container40 ?? "").trim() === "0" && isBlankOrZero(record.spec)) {
+		return `${record.Pqty ?? ""}P(${record.incargo ?? ""}EA)`;
+	}
+	return record.spec ?? "";
+}
+
+function buildSummaryTableHtml(records, showDate = true) {
+	if (!records.length) {
+		return `<p class="message">데이터가 없습니다.</p>`;
+	}
+	const groups = new Map();
+	records.forEach((record, index) => {
+		const container = String(record.container ?? "").trim();
+		const key = container ? `${getScheduleRecordDate(record)}|${container}` : `row-${index}`;
+		groups.set(key, [...(groups.get(key) ?? []), record]);
+	});
+	const rows = [...groups.values()]
+		.map((members, groupIndex) => {
+			const groupId = `g${groupIndex}`;
+			const groupSpec =
+				members.length > 1
+					? getSummarySpec(members.find(hasNonZeroContainer) ?? members[0])
+					: getSummarySpec(members[0]);
+			return members
+				.map((record, memberIndex) => {
+					const isSub = memberIndex > 0;
+					const toggleHtml =
+						memberIndex === 0 && members.length > 1
+							? `<button type="button" class="summary-toggle" data-summary-toggle="${groupId}" aria-expanded="false" title="같은 컨테이너 ${members.length}건">+</button>`
+							: "";
+					return `<tr class="${isSub ? "summary-sub-row" : ""}" data-summary-group="${groupId}">
+				${showDate ? `<td>${toggleHtml}${escapeHtml(getScheduleRecordDate(record))}</td>` : ""}
+				<td>${showDate ? "" : toggleHtml}${escapeHtml(record.consignee ?? "")}</td>
+				<td>${escapeHtml(record.description ?? "")}</td>
+				<td>${escapeHtml(members.length > 1 ? groupSpec : getSummarySpec(record))}</td>
+			</tr>`;
+				})
+				.join("");
+		})
+		.join("");
+	return `<div class="table-wrap"><table class="summary-table">
+		<thead><tr>${showDate ? "<th>날짜</th>" : ""}<th>화주</th><th>품명</th><th>Spec</th></tr></thead>
+		<tbody>${rows}</tbody>
+	</table></div>`;
+}
+
+function buildSummaryWeekHtml(records, startDate) {
+	const recordsByDate = groupRecordsByDate(records);
+	const cards = Array.from({ length: 6 }, (_, index) => {
+		const date = shiftDateString(startDate, index);
+		const weekday = SUMMARY_WEEKDAY_LABELS[parseDateString(date).getDay()];
+		return `<section class="summary-day-card">
+			<header class="summary-day-head">${date} (${weekday})</header>
+			${buildSummaryTableHtml(recordsByDate.get(date) ?? [], false)}
+		</section>`;
+	});
+	return `<div class="summary-week-grid">${cards.join("")}</div>`;
+}
+
+function buildSummaryCalendarHtml(records, startDate) {
+	const recordsByDate = groupRecordsByDate(records);
+	const first = parseDateString(startDate);
+	const year = first.getFullYear();
+	const month = first.getMonth();
+	const daysInMonth = new Date(year, month + 1, 0).getDate();
+	const cells = Array.from({ length: first.getDay() }, () => `<td class="summary-cal-empty"></td>`);
+	for (let day = 1; day <= daysInMonth; day += 1) {
+		const date = formatDateString(new Date(year, month, day));
+		const items = (recordsByDate.get(date) ?? [])
+			.map(
+				(record) =>
+					`<div class="summary-cal-item">${escapeHtml(record.consignee ?? "")} · ${escapeHtml(record.description ?? "")}</div>`
+			)
+			.join("");
+		cells.push(`<td><div class="summary-cal-date">${day}</div>${items}</td>`);
+	}
+	while (cells.length % 7) {
+		cells.push(`<td class="summary-cal-empty"></td>`);
+	}
+	const rows = [];
+	for (let index = 0; index < cells.length; index += 7) {
+		rows.push(`<tr>${cells.slice(index, index + 7).join("")}</tr>`);
+	}
+	const headHtml = SUMMARY_WEEKDAY_LABELS.map((label) => `<th>${label}</th>`).join("");
+	return `<div class="table-wrap"><table class="summary-calendar">
+		<thead><tr>${headHtml}</tr></thead>
+		<tbody>${rows.join("")}</tbody>
+	</table></div>`;
+}
+
+function buildSummaryFilterHtml(range) {
+	const { mode, date, startDate, endDate } = state.summary;
+	const modeButtonsHtml = Object.entries(SUMMARY_MODE_LABELS)
+		.map(
+			([id, label]) =>
+				`<button type="button" class="${mode === id ? "active" : ""}" data-summary-mode="${id}">${label}</button>`
+		)
+		.join("");
+	const controlsHtml = mode === "range"
+		? `<input type="date" class="summary-date" data-summary-field="startDate" value="${startDate}" aria-label="검색 시작일">
+			~ <input type="date" class="summary-date" data-summary-field="endDate" value="${endDate}" aria-label="검색 종료일">
+			<button type="button" data-summary-search>조회</button>`
+		: `<button type="button" data-summary-nav="-1" aria-label="이전">◀</button>
+			<input type="date" class="summary-date" data-summary-field="date" value="${date}" aria-label="기준일">
+			<button type="button" data-summary-nav="1" aria-label="다음">▶</button>`;
+	return `<div class="summary-filter">${modeButtonsHtml}${controlsHtml}<span class="summary-filter-label">${range.label}</span></div>`;
+}
+
+function renderSummarySection(bodyHtml) {
+	const section = app.querySelector(".app-summary");
+	if (!section) {
+		return;
+	}
+	section.innerHTML = `${buildSummaryFilterHtml(getSummaryRange())}<div class="summary-body">${bodyHtml}</div>`;
+	section.onclick = handleSummaryClick;
+	section.onchange = handleSummaryChange;
+}
+
+function handleSummaryClick(event) {
+	const toggleButton = event.target.closest("[data-summary-toggle]");
+	if (toggleButton) {
+		const isOpen = toggleButton.classList.toggle("open");
+		toggleButton.textContent = isOpen ? "-" : "+";
+		toggleButton.setAttribute("aria-expanded", String(isOpen));
+		event.currentTarget
+			.querySelectorAll(`tr.summary-sub-row[data-summary-group="${toggleButton.dataset.summaryToggle}"]`)
+			.forEach((row) => row.classList.toggle("open", isOpen));
+		return;
+	}
+	const modeButton = event.target.closest("[data-summary-mode]");
+	if (modeButton) {
+		state.summary.mode = modeButton.dataset.summaryMode;
+		loadSummaryView();
+		return;
+	}
+	const navButton = event.target.closest("[data-summary-nav]");
+	if (navButton) {
+		shiftSummaryDate(Number(navButton.dataset.summaryNav));
+		loadSummaryView();
+		return;
+	}
+	if (event.target.closest("[data-summary-search]")) {
+		const { startDate, endDate } = state.summary;
+		if (!startDate || !endDate) {
+			window.alert("검색 기간을 입력해 주세요.");
+		} else if (startDate > endDate) {
+			window.alert("시작일이 종료일보다 늦을 수 없습니다.");
+		} else {
+			loadSummaryView();
+		}
+	}
+}
+
+function handleSummaryChange(event) {
+	const field = event.target.dataset.summaryField;
+	if (!field || !event.target.value) {
+		return;
+	}
+	state.summary[field] = event.target.value;
+	if (field === "date") {
+		loadSummaryView();
+	}
+}
+
+function openSummaryTab() {
+	if (!state.summaryTabOpen) {
+		const today = getTodayDateString();
+		state.summary = { ...state.summary, mode: "week", date: today, startDate: today, endDate: today };
+	}
+	state.summaryTabOpen = true;
+	state.activeView = "summary";
+	renderTable();
+}
+
+async function loadSummaryView() {
+	const requestId = ++state.summary.requestId;
+	const range = getSummaryRange();
+	renderSummarySection(`<p class="message">불러오는 중...</p>`);
+	try {
+		const records = await loadSummaryRecords(range.start, range.end);
+		if (requestId !== state.summary.requestId) {
+			return;
+		}
+		const { mode } = state.summary;
+		let bodyHtml;
+		if (mode === "week") {
+			bodyHtml = buildSummaryWeekHtml(records, range.start);
+		} else if (mode === "month") {
+			bodyHtml = buildSummaryCalendarHtml(records, range.start);
+		} else {
+			bodyHtml = buildSummaryTableHtml(records);
+		}
+		renderSummarySection(bodyHtml);
+	} catch (error) {
+		if (requestId === state.summary.requestId) {
+			renderSummarySection(`<p class="message">${escapeHtml(error.message || "요약 데이터 로딩 중 오류가 발생했습니다.")}</p>`);
 		}
 	}
 }
