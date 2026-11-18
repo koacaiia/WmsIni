@@ -265,17 +265,24 @@ function makePopupDraggable(overlay) {
 }
 
 const SPEC_GROUPS = [
-	["20FT", "40FT", "LCL"],
-	["Pallet", "Bulk"],
+	[
+		{ label: "20FT", code: "20" },
+		{ label: "40FT", code: "40" },
+		{ label: "LCL", code: "L" },
+	],
+	[
+		{ label: "Pallet", code: "P" },
+		{ label: "Bulk", code: "B" },
+	],
 ];
 
 function buildSpecFieldHtml(label, value) {
-	const selected = String(value ?? "").split(",").map((part) => part.trim());
+	const stored = String(value ?? "");
 	const groupsHtml = SPEC_GROUPS.map(
 		(options, index) => `<div class="spec-option-group">${options
 			.map(
 				(option) =>
-					`<label><input type="radio" name="spec-group${index + 1}" value="${escapeHtml(option)}"${selected[index] === option ? " checked" : ""}> ${escapeHtml(option)}</label>`
+					`<label><input type="radio" name="spec-group${index + 1}" value="${escapeHtml(option.code)}"${stored.includes(option.code) || stored.includes(option.label) ? " checked" : ""}> ${escapeHtml(option.label)}</label>`
 			)
 			.join("")}</div>`
 	).join("");
@@ -287,8 +294,7 @@ function buildSpecFieldHtml(label, value) {
 }
 
 function readSpecField(root) {
-	const parts = SPEC_GROUPS.map((_, index) => root.querySelector(`input[name="spec-group${index + 1}"]:checked`)?.value ?? "");
-	return parts.some(Boolean) ? parts.join(",") : "";
+	return SPEC_GROUPS.map((_, index) => root.querySelector(`input[name="spec-group${index + 1}"]:checked`)?.value ?? "").join("");
 }
 
 function getScheduleFieldOptions(key, consignee = "") {
