@@ -76,7 +76,8 @@ const state = {
 	scheduleListMode: null,
 	scheduleSelection: new Map(),
 	scheduleRowRecords: new Map(),
-	summaryTabOpen: false,
+	scheduleLoadedRecords: [],
+	scheduleColumnFilters: new Map(),
 	summary: { mode: "week", date: "", startDate: "", endDate: "", requestId: 0 }
 };
 
@@ -234,6 +235,35 @@ function closeRowEditPopup() {
 	document.querySelector(".row-edit-overlay")?.remove();
 }
 
+function makePopupDraggable(overlay) {
+	const popup = overlay.querySelector(".row-edit-popup");
+	const handle = popup.querySelector(".row-edit-header");
+	const position = { x: 0, y: 0 };
+	let drag = null;
+	handle.style.cursor = "move";
+	handle.style.userSelect = "none";
+	handle.addEventListener("pointerdown", (event) => {
+		if (event.button !== 0) {
+			return;
+		}
+		drag = { pointerX: event.clientX, pointerY: event.clientY, x: position.x, y: position.y };
+		handle.setPointerCapture(event.pointerId);
+	});
+	handle.addEventListener("pointermove", (event) => {
+		if (!drag) {
+			return;
+		}
+		position.x = drag.x + event.clientX - drag.pointerX;
+		position.y = drag.y + event.clientY - drag.pointerY;
+		popup.style.transform = `translate(${position.x}px, ${position.y}px)`;
+	});
+	const endDrag = () => {
+		drag = null;
+	};
+	handle.addEventListener("pointerup", endDrag);
+	handle.addEventListener("pointercancel", endDrag);
+}
+
 const SPEC_GROUPS = [
 	["20FT", "40FT", "LCL"],
 	["Pallet", "Bulk"],
@@ -261,9 +291,177 @@ function readSpecField(root) {
 	return parts.some(Boolean) ? parts.join(",") : "";
 }
 
+function getScheduleFieldOptions(key, consignee = "") {
+	const values = new Set();
+	Object.values(state.scheduleRecordsByMonth).forEach((records) => {
+		records.forEach((record) => {
+			if (consignee && String(record.consignee ?? "").trim() !== consignee) {
+				return;
+			}
+			const value = String(record[key] ?? "").trim();
+			if (value) {
+				values.add(value);
+			}
+		});
+	});
+	return [...values].sort((a, b) => a.localeCompare(b, "ko"));
+}
+
+function buildSelectOptionsHtml(options, value) {
+	return [
+		`<option value="">선택</option>`,
+		...options.map(
+			(option) => `<option value="${escapeHtml(option)}"${option === value ? " selected" : ""}>${escapeHtml(option)}</option>`
+		)
+	].join("");
+}
+
+function buildTextControlHtml(key, value) {
+	return `<input type="text" class="row-edit-input" data-key="${escapeHtml(key)}" value="${escapeHtml(value)}">`;
+}
+
+function buildSelectInputHtml(label, key, value, options) {
+	const selectOptions = value && !options.includes(value) ? [...options, value] : options;
+	return `
+				<div class="row-edit-field">
+					<span class="row-edit-label">${escapeHtml(label)}</span>
+					<div class="select-input-controls">
+						<select class="row-edit-select" data-key="${escapeHtml(key)}">${buildSelectOptionsHtml(selectOptions, value)}</select>
+						<button type="button" class="row-edit-toggle" aria-pressed="false">직접</button>
+					</div>
+				</div>`;
+}
+
+function getLinkedFieldOptions(overlay, key) {
+	const consignee = key === "description" ? overlay.querySelector('[data-key="consignee"]')?.value.trim() ?? "" : "";
+	return getScheduleFieldOptions(key, consignee);
+}
+
+function toggleSelectInput(toggleButton, overlay) {
+	const container = toggleButton.parentElement;
+	const control = container.querySelector(".row-edit-select, .row-edit-input");
+	const key = control.dataset.key;
+	const value = control.value.trim();
+	const isInputMode = control.matches("input");
+	const template = document.createElement("template");
+	if (isInputMode) {
+		const options = getLinkedFieldOptions(overlay, key);
+		template.innerHTML = `<select class="row-edit-select" data-key="${escapeHtml(key)}">${buildSelectOptionsHtml(options, options.includes(value) ? value : "")}</select>`;
+	} else {
+		template.innerHTML = buildTextControlHtml(key, value);
+	}
+	const nextControl = template.content.firstElementChild;
+	control.replaceWith(nextControl);
+	if (!isInputMode) {
+		nextControl.focus();
+	}
+	toggleButton.setAttribute("aria-pressed", String(!isInputMode));
+	toggleButton.textContent = isInputMode ? "직접" : "선택";
+}
+
+function refreshDescriptionOptions(overlay, preserveCurrent = false) {
+	const descriptionSelect = overlay.querySelector('select.row-edit-select[data-key="description"]');
+	if (!descriptionSelect) {
+		return;
+	}
+	const currentValue = descriptionSelect.value;
+	const options = getLinkedFieldOptions(overlay, "description");
+	if (preserveCurrent && currentValue && !options.includes(currentValue)) {
+		options.push(currentValue);
+	}
+	const selectedValue = options.includes(currentValue) ? currentValue : "";
+	descriptionSelect.innerHTML = buildSelectOptionsHtml(options.sort((a, b) => a.localeCompare(b, "ko")), selectedValue);
+}
+
+function isWeekendDateString(dateString) {
+	const day = parseDateString(dateString).getDay();
+	return day === 0 || day === 6;
+}
+
+function nextBusinessDateString(dateString) {
+	let result = dateString;
+	while (isWeekendDateString(result)) {
+		result = shiftDateString(result, 1);
+	}
+	return result;
+}
+
+function getQuickDateOptions() {
+	const today = getTodayDateString();
+	const tomorrow = shiftDateString(today, 1);
+	const dayAfterTomorrow = shiftDateString(today, 2);
+	const first = nextBusinessDateString(tomorrow);
+	const second = nextBusinessDateString(shiftDateString(first, 1));
+	return [
+		{ label: first === tomorrow ? "내일" : "다음 영업일", date: first },
+		{ label: second === dayAfterTomorrow ? "내일모레" : "그 다음 영업일", date: second }
+	];
+}
+
+function buildDateFieldHtml(label, value) {
+	const quickButtonsHtml = getQuickDateOptions()
+		.map((quick) => `<button type="button" class="date-quick-btn" data-date="${quick.date}" title="${quick.label} ${quick.date}">${parseDateString(quick.date).getDate()}</button>`)
+		.join("");
+	return `
+				<div class="row-edit-field date-field">
+					<span class="row-edit-label date-label" data-default-label="${escapeHtml(label)}">${escapeHtml(value || label)}</span>
+					<div class="date-input-controls">
+						<input type="date" class="row-edit-input" data-key="date" value="${escapeHtml(value)}">
+						${quickButtonsHtml}
+					</div>
+				</div>`;
+}
+
+function syncDateLabel(dateInput) {
+	const labelEl = dateInput.closest(".date-field").querySelector(".date-label");
+	labelEl.textContent = dateInput.value || labelEl.dataset.defaultLabel;
+}
+
+function buildScheduleFieldHtml(key, label, value) {
+	if (key === "spec") {
+		return buildSpecFieldHtml(label, value);
+	}
+	if (key === "date") {
+		return buildDateFieldHtml(label, value);
+	}
+	if (key === "consignee" || key === "description") {
+		return buildSelectInputHtml(label, key, value, getScheduleFieldOptions(key));
+	}
+	return `
+				<label class="row-edit-field">
+					<span class="row-edit-label">${escapeHtml(label)}</span>
+					<input type="text" class="row-edit-input" data-key="${escapeHtml(key)}" value="${escapeHtml(value)}">
+				</label>`;
+}
+
+function bindScheduleFieldEvents(overlay) {
+	overlay.addEventListener("change", (event) => {
+		if (event.target.dataset.key === "consignee") {
+			refreshDescriptionOptions(overlay);
+		}
+		if (event.target.matches('input[type="date"]')) {
+			syncDateLabel(event.target);
+		}
+	});
+	overlay.addEventListener("click", (event) => {
+		const toggleButton = event.target.closest(".row-edit-toggle");
+		if (toggleButton) {
+			toggleSelectInput(toggleButton, overlay);
+			return;
+		}
+		const quickButton = event.target.closest(".date-quick-btn");
+		if (quickButton) {
+			const dateInput = quickButton.closest(".date-input-controls").querySelector('input[type="date"]');
+			dateInput.value = quickButton.dataset.date;
+			syncDateLabel(dateInput);
+		}
+	});
+	refreshDescriptionOptions(overlay, true);
+}
+
 function collectFormValues(overlay) {
 	const values = Object.fromEntries(
-		Array.from(overlay.querySelectorAll(".row-edit-input[data-key]")).map((input) => [input.dataset.key, input.value.trim()])
+		Array.from(overlay.querySelectorAll(".row-edit-input[data-key], .row-edit-select[data-key]")).map((field) => [field.dataset.key, field.value.trim()])
 	);
 	if (overlay.querySelector(".spec-field")) {
 		values.spec = readSpecField(overlay);
@@ -278,18 +476,7 @@ function openNewRecordPopup() {
 	}
 	const today = getTodayDateString();
 	const fieldsHtml = fieldHeaders
-		.map((th) => {
-			const key = th.dataset.key;
-			if (key === "spec") {
-				return buildSpecFieldHtml(th.textContent.trim(), "");
-			}
-			const value = key === "date" ? today : "";
-			return `
-				<label class="row-edit-field">
-					<span class="row-edit-label">${escapeHtml(th.textContent.trim())}</span>
-					<input type="${key === "date" ? "date" : "text"}" class="row-edit-input" data-key="${escapeHtml(key)}" value="${escapeHtml(value)}">
-				</label>`;
-		})
+		.map((th) => buildScheduleFieldHtml(th.dataset.key, th.textContent.trim(), th.dataset.key === "date" ? today : ""))
 		.join("");
 
 	const overlay = document.createElement("div");
@@ -321,6 +508,8 @@ function openNewRecordPopup() {
 		</div>
 	`;
 	document.body.append(overlay);
+	bindScheduleFieldEvents(overlay);
+	makePopupDraggable(overlay);
 
 	const builder = overlay.querySelector(".new-list-builder");
 	const countInput = overlay.querySelector(".new-list-count");
@@ -409,17 +598,12 @@ function openNewRecordPopup() {
 	overlay.addEventListener("input", updatePreview);
 	overlay.addEventListener("change", updatePreview);
 	overlay.addEventListener("click", (event) => {
-		if (event.target === overlay || event.target.closest(".new-record-cancel")) {
+		if (event.target.closest(".new-record-cancel")) {
 			overlay.remove();
 		} else if (event.target.closest(".new-record-save")) {
 			saveRecords();
 		} else if (event.target.closest(".new-record-add-list")) {
 			addToList();
-		}
-	});
-	overlay.addEventListener("keydown", (event) => {
-		if (event.key === "Escape") {
-			overlay.remove();
 		}
 	});
 }
@@ -547,17 +731,21 @@ function renderTable() {
 	const summaryTabHtml = state.summaryTabOpen
 		? `<button class="sheet-tab view-tab ${state.activeView === "summary" ? "active" : ""}" type="button" data-view="summary">${SUMMARY_TAB_LABEL}</button>`
 		: "";
+	const excelTabHtml = state.activeView === "schedule"
+		? `<button class="sheet-tab excel-export-tab" type="button" title="현재 스케줄 표를 Excel 파일로 내보내기">Excel File 생성</button>`
+		: "";
 	const yearPickerHtml = state.activeView === "schedule"
 		? `<label class="year-picker">년도 <select class="year-select" aria-label="년도 선택">${buildYearOptionsHtml()}</select></label><button type="button" class="new-record-btn">신규자료+</button><button type="button" class="list-mode-btn" data-mode="edit">목록수정</button><button type="button" class="list-mode-btn" data-mode="delete">목록삭제</button><button type="button" class="summary-open-btn">입고요약</button>`
 		: "";
 	app.innerHTML = `
-		<div class="view-tabs">${viewTabsHtml}${summaryTabHtml}${yearPickerHtml}</div>
+		<div class="view-tabs">${viewTabsHtml}${summaryTabHtml}${excelTabHtml}${yearPickerHtml}</div>
 		${contentHtml}
 	`;
 
 	if (state.activeView === "schedule") {
 		loadScheduleView();
 		app.querySelector(".new-record-btn")?.addEventListener("click", openNewRecordPopup);
+		app.querySelector(".excel-export-tab")?.addEventListener("click", exportScheduleTableToExcel);
 		app.querySelectorAll(".list-mode-btn").forEach((button) => {
 			button.addEventListener("click", () => setListMode(button.dataset.mode));
 		});
@@ -724,8 +912,101 @@ function renderLoadedScheduleRows(scrollToToday) {
 	for (let index = scheduleLoadedStart; index <= scheduleLoadedEnd && index >= 0; index += 1) {
 		records.push(...(state.scheduleRecordsByMonth[scheduleMonths[index]] ?? []));
 	}
+	state.scheduleLoadedRecords = records;
 	renderScheduleRows(records, scrollToToday);
 }
+
+function getScheduleFilterValues(key) {
+	const values = new Set(state.scheduleLoadedRecords.map((record) => String(record[key] ?? "")));
+	return Array.from(values).sort((a, b) => a.localeCompare(b, "ko"));
+}
+
+function matchesScheduleColumnFilters(record) {
+	for (const [key, selectedValues] of state.scheduleColumnFilters) {
+		if (!selectedValues.has(String(record[key] ?? ""))) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function closeColumnFilterPanel() {
+	document.querySelector(".column-filter-panel")?.remove();
+}
+
+function openColumnFilterPanel(th) {
+	const key = th.dataset.key;
+	const wasOpenForKey = document.querySelector(".column-filter-panel")?.dataset.key === key;
+	closeColumnFilterPanel();
+	if (wasOpenForKey) {
+		return;
+	}
+
+	const values = getScheduleFilterValues(key);
+	const selectedValues = state.scheduleColumnFilters.get(key);
+	const panel = document.createElement("div");
+	panel.className = "column-filter-panel";
+	panel.dataset.key = key;
+	panel.innerHTML = `
+		<div class="column-filter-actions">
+			<button type="button" data-action="all">전체 표시</button>
+			<button type="button" data-action="clear">선택 해제</button>
+			<button type="button" data-action="close">닫기</button>
+		</div>
+		<div class="column-filter-options">
+			${values
+				.map((value, index) => `<label><input type="checkbox" data-index="${index}"${!selectedValues || selectedValues.has(value) ? " checked" : ""}><span>${escapeHtml(value || "(빈 값)")}</span></label>`)
+				.join("")}
+		</div>
+	`;
+	document.body.append(panel);
+	const rect = th.getBoundingClientRect();
+	panel.style.top = `${rect.bottom}px`;
+	panel.style.left = `${Math.max(0, Math.min(rect.left, window.innerWidth - panel.offsetWidth))}px`;
+
+	panel.addEventListener("change", () => {
+		const checkedValues = Array.from(panel.querySelectorAll("input[type=checkbox]"))
+			.filter((checkbox) => checkbox.checked)
+			.map((checkbox) => values[Number(checkbox.dataset.index)]);
+		if (checkedValues.length === values.length) {
+			state.scheduleColumnFilters.delete(key);
+		} else {
+			state.scheduleColumnFilters.set(key, new Set(checkedValues));
+		}
+		renderLoadedScheduleRows(false);
+	});
+	panel.addEventListener("click", (event) => {
+		const action = event.target.closest("[data-action]")?.dataset.action;
+		if (action === "all") {
+			state.scheduleColumnFilters.delete(key);
+			panel.querySelectorAll("input[type=checkbox]").forEach((checkbox) => {
+				checkbox.checked = true;
+			});
+			renderLoadedScheduleRows(false);
+		} else if (action === "clear") {
+			state.scheduleColumnFilters.set(key, new Set());
+			panel.querySelectorAll("input[type=checkbox]").forEach((checkbox) => {
+				checkbox.checked = false;
+			});
+			renderLoadedScheduleRows(false);
+		} else if (action === "close") {
+			closeColumnFilterPanel();
+		}
+	});
+}
+
+app.addEventListener("click", (event) => {
+	const th = event.target.closest(".schedule-table thead th[data-key]");
+	if (th) {
+		openColumnFilterPanel(th);
+	}
+});
+
+document.addEventListener("click", (event) => {
+	if (!event.target.closest(".column-filter-panel, .schedule-table thead th[data-key]")) {
+		closeColumnFilterPanel();
+	}
+});
 
 async function extendScheduleMonths(direction) {
 	const generation = state.scheduleRequestId;
@@ -793,7 +1074,11 @@ function renderScheduleRows(records, scrollToToday) {
 		return;
 	}
 	const keys = Array.from(app.querySelectorAll(".schedule-table thead th")).map((th) => th.dataset.key || "");
+	app.querySelectorAll(".schedule-table thead th[data-key]").forEach((th) => {
+		th.classList.toggle("filter-active", state.scheduleColumnFilters.has(th.dataset.key));
+	});
 	const sortedRecords = records
+		.filter(matchesScheduleColumnFilters)
 		.map((record) => ({ record, date: getScheduleRecordDate(record) }))
 		.sort((a, b) => (a.date || "\uffff").localeCompare(b.date || "\uffff"));
 	const containerFields = ["consignee", "count", "container"];
@@ -878,6 +1163,9 @@ function renderScheduleRows(records, scrollToToday) {
 								const shown = bExpanded ? original : escapeHtml(`${record[key] ?? ""}*${bCount}대`);
 								return `<td data-original="${original}">${shown}</td>`;
 							}
+							if (key === "container" && bKey && record.working === "") {
+								return `<td data-working-empty="1"${bExpanded ? ' class="working-alert"' : ""}>${escapeHtml(record[key] ?? "")}</td>`;
+							}
 							return `<td>${cellIndex === 0 ? selectHtml : ""}${toggles}${key ? escapeHtml(record[key] ?? "") : ""}</td>`;
 						})
 						.join("");
@@ -915,6 +1203,10 @@ function renderScheduleRows(records, scrollToToday) {
 			const parentRow = toggle.closest("tr");
 			const specCell = parentRow.cells[specIndex];
 			specCell.textContent = expanded ? specCell.dataset.original : `${specCell.dataset.original}*${parentRow.dataset.count}대`;
+		}
+		if (groupKey.startsWith("b|")) {
+			const groupRows = [toggle.closest("tr"), ...[...tbody.querySelectorAll("tr[data-b-key]")].filter((row) => row.dataset.bKey === groupKey)];
+			groupRows.forEach((row) => row.querySelector("td[data-working-empty]")?.classList.toggle("working-alert", expanded));
 		}
 	};
 
@@ -1033,17 +1325,7 @@ function openScheduleEditPopup(record, sequence) {
 		.map((value) => value ?? "")
 		.join("_") + `+(${sequence})`;
 	const fieldsHtml = Array.from(app.querySelectorAll(".schedule-table thead th[data-key]"))
-		.map((th) => {
-			const key = th.dataset.key;
-			if (key === "spec") {
-				return buildSpecFieldHtml(th.textContent.trim(), data.spec);
-			}
-			return `
-				<label class="row-edit-field">
-					<span class="row-edit-label">${escapeHtml(th.textContent.trim())}</span>
-					<input type="${key === "date" ? "date" : "text"}" class="row-edit-input" data-key="${escapeHtml(key)}" value="${escapeHtml(data[key] ?? "")}">
-				</label>`;
-		})
+		.map((th) => buildScheduleFieldHtml(th.dataset.key, th.textContent.trim(), data[th.dataset.key] ?? ""))
 		.join("");
 
 	const overlay = document.createElement("div");
@@ -1055,11 +1337,15 @@ function openScheduleEditPopup(record, sequence) {
 			<footer class="row-edit-footer">
 				<span class="new-record-message"></span>
 				<button type="button" class="edit-record-cancel">취소</button>
+				<button type="button" class="edit-record-continuous">연속수정</button>
+				<button type="button" class="edit-record-reregister">재등록</button>
 				<button type="button" class="row-edit-save edit-record-save">수정</button>
 			</footer>
 		</div>
 	`;
 	document.body.append(overlay);
+	bindScheduleFieldEvents(overlay);
+	makePopupDraggable(overlay);
 	overlay.querySelector(".row-edit-input")?.focus();
 
 	return new Promise((resolve) => {
@@ -1067,26 +1353,49 @@ function openScheduleEditPopup(record, sequence) {
 			overlay.remove();
 			resolve(result);
 		};
-		overlay.addEventListener("click", (event) => {
-			if (event.target === overlay || event.target.closest(".edit-record-cancel")) {
-				close(null);
-			} else if (event.target.closest(".edit-record-save")) {
-				const form = collectFormValues(overlay);
-				const values = { ...data, ...form };
-				const error = getScheduleRecordError(values);
-				if (error) {
-					overlay.querySelector(".new-record-message").textContent = error;
+		const showMessage = (message) => {
+			overlay.querySelector(".new-record-message").textContent = message;
+		};
+		const submit = async (action) => {
+			const values = { ...data, ...collectFormValues(overlay) };
+			const error = getScheduleRecordError(values);
+			if (error) {
+				showMessage(error);
+				return;
+			}
+			if (action === "reregister") {
+				const snapshot = await get(ref(state.database, buildScheduleRecordPath(values.date, values.consignee, getScheduleNodeKey(values))));
+				if (snapshot.exists()) {
+					showMessage("같은 키의 자료가 이미 있어 재등록할 수 없습니다. 날짜·BL·품명·수량 중 하나를 변경해 주세요.");
 					return;
 				}
-				close(values);
 			}
-		});
-		overlay.addEventListener("keydown", (event) => {
-			if (event.key === "Escape") {
+			close({ values, action });
+		};
+		overlay.addEventListener("click", (event) => {
+			if (event.target.closest(".edit-record-cancel")) {
 				close(null);
+			} else if (event.target.closest(".edit-record-continuous")) {
+				submit("continuous");
+			} else if (event.target.closest(".edit-record-reregister")) {
+				submit("reregister");
+			} else if (event.target.closest(".edit-record-save")) {
+				submit("save");
 			}
 		});
 	});
+}
+
+async function registerEditedScheduleRecordCopy(values) {
+	await set(
+		ref(state.database, buildScheduleRecordPath(values.date, values.consignee, getScheduleNodeKey(values))),
+		buildScheduleNodeValue(values)
+	);
+}
+
+async function saveEditedScheduleRecord(record, values) {
+	await moveScheduleRecordToRecycleBin(record);
+	await registerEditedScheduleRecordCopy(values);
 }
 
 async function completeListAction() {
@@ -1110,15 +1419,35 @@ async function completeListAction() {
 			}
 		} else {
 			for (const [index, record] of records.entries()) {
-				const values = await openScheduleEditPopup(record, index + 1);
-				if (!values) {
+				const result = await openScheduleEditPopup(record, index + 1);
+				if (!result) {
 					continue;
 				}
-				await moveScheduleRecordToRecycleBin(record);
-				await set(
-					ref(state.database, buildScheduleRecordPath(values.date, values.consignee, getScheduleNodeKey(values))),
-					buildScheduleNodeValue(values)
-				);
+				if (result.action === "reregister") {
+					await registerEditedScheduleRecordCopy(result.values);
+					continue;
+				}
+				await saveEditedScheduleRecord(record, result.values);
+				if (result.action === "continuous") {
+					const original = getScheduleRecordData(record);
+					const changed = Object.fromEntries(
+						Object.entries(result.values).filter(([key, value]) => (value ?? "") !== (original[key] ?? ""))
+					);
+					const restTargets = records.slice(index + 1).map((restRecord) => ({
+						record: restRecord,
+						values: { ...getScheduleRecordData(restRecord), ...changed },
+					}));
+					for (const target of restTargets) {
+						const error = getScheduleRecordError(target.values);
+						if (error) {
+							throw new Error(`${target.values.date ?? ""} ${target.values.consignee ?? ""}: ${error}`);
+						}
+					}
+					for (const target of restTargets) {
+						await saveEditedScheduleRecord(target.record, target.values);
+					}
+					break;
+				}
 			}
 		}
 	} catch (error) {
@@ -1129,6 +1458,41 @@ async function completeListAction() {
 	state.scheduleSelection = new Map();
 	updateListModeControls();
 	await loadScheduleView();
+}
+
+function exportScheduleTableToExcel() {
+	const table = app.querySelector(".schedule-table");
+	if (!table) {
+		window.alert("스케줄 표가 없습니다.");
+		return;
+	}
+	const headerCells = Array.from(table.querySelectorAll("thead th")).map((th) => th.textContent.trim());
+	const bodyRows = Array.from(table.querySelectorAll("tbody tr"))
+		.filter((row) => !row.hidden && !row.querySelector("td.empty"))
+		.map((row) =>
+			Array.from(row.cells).map((cell) => {
+				const clone = cell.cloneNode(true);
+				clone.querySelectorAll(".group-toggle, input").forEach((element) => element.remove());
+				return clone.textContent.trim();
+			})
+		);
+	const toRowXml = (cells) =>
+		`<Row>${cells.map((value) => `<Cell><Data ss:Type="String">${escapeHtml(value)}</Data></Cell>`).join("")}</Row>`;
+	const workbookXml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<Worksheet ss:Name="스케줄"><Table>${[headerCells, ...bodyRows].map(toRowXml).join("")}</Table></Worksheet>
+</Workbook>`;
+
+	const blob = new Blob([workbookXml], { type: "application/vnd.ms-excel;charset=utf-8" });
+	const url = URL.createObjectURL(blob);
+	const link = document.createElement("a");
+	link.href = url;
+	link.download = `스케줄_${state.scheduleYear || "export"}_${getTodayDateString()}.xls`;
+	document.body.append(link);
+	link.click();
+	link.remove();
+	URL.revokeObjectURL(url);
 }
 
 async function loadScheduleView() {

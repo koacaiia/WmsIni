@@ -80,14 +80,8 @@ body {
 
 .schedule-table th:nth-child(6),
 .schedule-table th:nth-child(8),
-.schedule-table th:nth-child(10),
-.schedule-table th:nth-child(11),
-.schedule-table th:nth-child(12),
 .schedule-table td:nth-child(6),
-.schedule-table td:nth-child(8),
-.schedule-table td:nth-child(10),
-.schedule-table td:nth-child(11),
-.schedule-table td:nth-child(12) {
+.schedule-table td:nth-child(8) {
   padding: 4px 2px;
   font-size: 9px;
   line-height: 1.2;
@@ -101,6 +95,53 @@ body {
   background: #eef3f8;
 }
 
+.schedule-table thead th[data-key] {
+  cursor: pointer;
+}
+
+.schedule-table thead th.filter-active {
+  background: #fff4cc;
+  color: #8a5a00;
+}
+
+.column-filter-panel {
+  position: fixed;
+  z-index: 1000;
+  min-width: 160px;
+  max-width: 260px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #5b8fd6;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  color: #222;
+}
+
+.column-filter-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.column-filter-actions button {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.column-filter-options {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.column-filter-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
 .schedule-table tbody tr.same-group td {
   background: grey;
   color: #fff;
@@ -109,6 +150,11 @@ body {
 .schedule-table tbody tr.bl-group td {
   background: silver;
   color: #1a1a1a;
+}
+
+.schedule-table tbody tr td.working-alert {
+  color: red;
+  font-weight: bold;
 }
 
 .schedule-table tbody tr.date-first {
@@ -299,13 +345,20 @@ tbody tr {
   align-items: center;
   gap: 12px;
   margin-bottom: 8px;
+  font-size: 0.8em;
 }
 
 .row-edit-label {
-  flex: 0 0 40%;
-  font-size: 13px;
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 10.4px;
   font-weight: 600;
   color: #3f4f60;
+}
+
+.row-edit-field > :not(.row-edit-label):not(.date-label) {
+  flex: 2 1 0;
+  min-width: 0;
 }
 
 .row-edit-input {
@@ -319,12 +372,110 @@ tbody tr {
   font: inherit;
 }
 
+.select-input-controls,
+.date-input-controls {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.select-input-controls .row-edit-input,
+.date-input-controls .row-edit-input {
+  min-width: 0;
+}
+
+.row-edit-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px solid #5b8fd6;
+  border-radius: 4px;
+  font: inherit;
+  background: #fff;
+}
+
+.date-input-controls > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.date-input-controls > input[type="date"] {
+  flex: 2 1 0;
+}
+
+.date-field > .date-label {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-edit-toggle {
+  flex: 0 0 auto;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid #5b8fd6;
+  border-radius: 4px;
+  background: #fff;
+  color: #2d5ea8;
+  font: inherit;
+  font-size: 10.4px;
+  cursor: pointer;
+}
+
+.row-edit-toggle[aria-pressed="true"] {
+  background: #eaf2fc;
+}
+
+.date-quick-btn {
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid #5b8fd6;
+  border-radius: 4px;
+  background: #fff;
+  color: #2d5ea8;
+  font: inherit;
+  font-size: 10.4px;
+  cursor: pointer;
+}
+
+.date-quick-btn:hover {
+  background: #eaf2fc;
+}
+
+.spec-field > .spec-option-group {
+  flex-wrap: nowrap;
+  gap: 1%;
+  min-width: 0;
+}
+
+.spec-field > .spec-option-group:nth-child(2) {
+  flex: 3 1 0;
+}
+
+.spec-field > .spec-option-group:nth-child(3) {
+  flex: 2 1 0;
+}
+
 .spec-option-group {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 1%;
   flex: 1 1 auto;
-  font-size: 13px;
+  font-size: 10.4px;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid #5b8fd6;
+  border-radius: 4px;
 }
 
 .spec-option-group label {
