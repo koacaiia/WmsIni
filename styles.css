@@ -142,14 +142,16 @@ body {
   white-space: nowrap;
 }
 
-.schedule-table tbody tr.same-group td {
-  background: grey;
-  color: #fff;
+.schedule-table tbody tr.date-band-even td {
+  background: #e3f2fb;
 }
 
-.schedule-table tbody tr.bl-group td {
-  background: silver;
-  color: #1a1a1a;
+.schedule-table tbody tr.date-band-odd td {
+  background: #f3fafd;
+}
+
+.schedule-table tbody tr.date-break td {
+  border-top: calc(32px * 0.15) solid #ffffff;
 }
 
 .schedule-table tbody tr td.working-alert {
@@ -157,8 +159,15 @@ body {
   font-weight: bold;
 }
 
-.schedule-table tbody tr.date-first {
-  border-top: 4px double red;
+.schedule-table tbody tr td.group-emphasis {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
+.schedule-table tbody tr td.fit-text {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .group-toggle {

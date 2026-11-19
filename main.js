@@ -297,6 +297,12 @@ function readSpecField(root) {
 	return SPEC_GROUPS.map((_, index) => root.querySelector(`input[name="spec-group${index + 1}"]:checked`)?.value ?? "").join("");
 }
 
+function getEmptySpecGroupLabels(spec) {
+	const value = String(spec ?? "");
+	return SPEC_GROUPS.filter((options) => !options.some((option) => value.includes(option.code)))
+		.map((options) => `Spec(${options.map((option) => option.label).join("/")})`);
+}
+
 function getScheduleFieldOptions(key, consignee = "") {
 	const values = new Set();
 	Object.values(state.scheduleRecordsByMonth).forEach((records) => {
@@ -475,6 +481,8 @@ function collectFormValues(overlay) {
 	return values;
 }
 
+const OPTIONAL_NEW_RECORD_KEYS = new Set(["layout", "remark"]);
+
 function openNewRecordPopup() {
 	const fieldHeaders = Array.from(app.querySelectorAll(".schedule-table thead th[data-key]"));
 	if (!fieldHeaders.length || document.querySelector(".new-record-overlay")) {
@@ -572,6 +580,22 @@ function openNewRecordPopup() {
 	};
 	const saveRecords = async () => {
 		const records = items.length ? items.map((item) => item.record) : [collectForm()];
+		const emptyLabels = new Set();
+		records.forEach((record) => {
+			fieldHeaders
+				.filter((th) => !OPTIONAL_NEW_RECORD_KEYS.has(th.dataset.key))
+				.forEach((th) => {
+					if (th.dataset.key === "spec") {
+						getEmptySpecGroupLabels(record.spec).forEach((label) => emptyLabels.add(label));
+					} else if (!String(record[th.dataset.key] ?? "").trim()) {
+						emptyLabels.add(th.textContent.trim());
+					}
+				});
+		});
+		if (emptyLabels.size) {
+			window.alert(`공란이 있어 저장을 보류합니다.\n\n공란 항목: ${[...emptyLabels].join(", ")}\n\n내용을 입력한 후 다시 저장해 주세요.`);
+			return;
+		}
 		const error = records.map(getScheduleRecordError).find(Boolean);
 		if (error) {
 			showMessage(error);
@@ -1087,7 +1111,7 @@ function renderScheduleRows(records, scrollToToday) {
 		.filter(matchesScheduleColumnFilters)
 		.map((record) => ({ record, date: getScheduleRecordDate(record) }))
 		.sort((a, b) => (a.date || "\uffff").localeCompare(b.date || "\uffff"));
-	const containerFields = ["consignee", "count", "container"];
+	const containerFields = ["container"];
 	const blFields = ["consignee", "bl", "description"];
 	const groupRuns = (fields) => {
 		const starts = [];
@@ -1102,9 +1126,15 @@ function renderScheduleRows(records, scrollToToday) {
 	};
 	const containerRuns = groupRuns(containerFields);
 	const blRuns = groupRuns(blFields);
+	const specIndex = keys.indexOf("spec");
 	const runKey = (prefix, { record, date }, fields) =>
 		[prefix, date, ...fields.map((key) => record[key] ?? "")].join("|");
-	const specIndex = keys.indexOf("spec");
+	const dateBandIndexByDate = new Map();
+	sortedRecords.forEach(({ date }) => {
+		if (!dateBandIndexByDate.has(date)) {
+			dateBandIndexByDate.set(date, dateBandIndexByDate.size);
+		}
+	});
 	state.scheduleRowRecords = new Map(sortedRecords.map(({ record }) => [record._path, record]));
 
 	tbody.innerHTML = sortedRecords.length
@@ -1122,24 +1152,23 @@ function renderScheduleRows(records, scrollToToday) {
 					const aExpanded = state.expandedScheduleGroups.has(aKey);
 					const bExpanded = state.expandedScheduleGroups.has(bKey);
 					const bCount = blRuns.sizes.get(bStart);
+					const aCount = containerRuns.sizes.get(aStart);
+					const blDiffers = Boolean(aKey) && aIsChild && record.bl !== sortedRecords[aStart].record.bl;
 					const selectHtml = state.scheduleListMode
 						? `<input type="radio" class="schedule-select" data-path="${escapeHtml(record._path)}"${state.scheduleSelection.has(record._path) ? " checked" : ""}>`
 						: "";
 
-					const classes = [];
+					const dateBand = dateBandIndexByDate.get(date) % 2 === 0 ? "date-band-even" : "date-band-odd";
+					const classes = [dateBand];
+					if (index > 0 && sortedRecords[index - 1].date !== date) {
+						classes.push("date-break");
+					}
 					if (aKey) {
 						classes.push("same-group", aIsChild ? "group-child" : "group-parent");
 					}
 					if (bKey) {
 						classes.push("bl-group");
 					}
-					if (index === 0 || sortedRecords[index - 1].date !== date) {
-						classes.push("date-first");
-					}
-					if (index === sortedRecords.length - 1 || sortedRecords[index + 1].date !== date) {
-						classes.push("date-last");
-					}
-					classes.push("date-block");
 					const attrs = [`data-date="${date}"`];
 					if (aIsChild) {
 						attrs.push(`data-a-key="${escapeHtml(aKey)}"`);
@@ -1161,24 +1190,49 @@ function renderScheduleRows(records, scrollToToday) {
 						`<button type="button" class="group-toggle" data-group-key="${escapeHtml(key)}" aria-expanded="${expanded}">${expanded ? "-" : "+"}</button>`;
 					const cells = keys
 						.map((key, cellIndex) => {
-							const toggles = cellIndex === 0
-								? (aHasChildren ? toggleButton(aKey, aExpanded) : "") + (bHasChildren ? toggleButton(bKey, bExpanded) : "")
-								: "";
+							const toggles = key === "container" && bHasChildren
+								? toggleButton(bKey, bExpanded)
+								: key === "description" && aHasChildren
+									? toggleButton(aKey, aExpanded)
+									: "";
 							if (cellIndex === specIndex && bHasChildren) {
 								const original = escapeHtml(record[key] ?? "");
 								const shown = bExpanded ? original : escapeHtml(`${record[key] ?? ""}*${bCount}대`);
 								return `<td data-original="${original}">${shown}</td>`;
 							}
-							if (key === "container" && bKey && record.working === "") {
-								return `<td data-working-empty="1"${bExpanded ? ' class="working-alert"' : ""}>${escapeHtml(record[key] ?? "")}</td>`;
+							const emphasized = (key === "container" && bKey) || (key === "description" && aKey) || (key === "bl" && blDiffers);
+							const cellClasses = [emphasized ? "group-emphasis" : ""];
+							if (key === "description" && emphasized) {
+								cellClasses.push("fit-text");
 							}
-							return `<td>${cellIndex === 0 ? selectHtml : ""}${toggles}${key ? escapeHtml(record[key] ?? "") : ""}</td>`;
+							if (key === "container" && bKey && record.working === "") {
+								if (bExpanded) {
+									cellClasses.push("working-alert");
+								}
+								return `<td data-working-empty="1" class="${cellClasses.filter(Boolean).join(" ")}">${toggles}${escapeHtml(record[key] ?? "")}</td>`;
+							}
+							const text = key === "description" && aHasChildren ? `${record[key] ?? ""}외${aCount}건` : (record[key] ?? "");
+							const classAttr = cellClasses.some(Boolean) ? ` class="${cellClasses.filter(Boolean).join(" ")}"` : "";
+							return `<td${classAttr}>${cellIndex === 0 ? selectHtml : ""}${toggles}${key ? escapeHtml(text) : ""}</td>`;
 						})
 						.join("");
 					return `<tr ${attrs.join(" ")}>${cells}</tr>`;
 				})
 				.join("")
 		: `<tr><td class="empty" colspan="${keys.length}">데이터가 없습니다.</td></tr>`;
+
+	tbody.querySelectorAll("td.fit-text").forEach((cell) => {
+		cell.style.fontSize = "";
+		const style = getComputedStyle(cell);
+		const available = cell.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+		const range = document.createRange();
+		range.selectNodeContents(cell);
+		let size = parseFloat(style.fontSize);
+		while (range.getBoundingClientRect().width > available && size > 8) {
+			size -= 0.5;
+			cell.style.fontSize = `${size}px`;
+		}
+	});
 
 	tbody.onclick = (event) => {
 		const select = event.target.closest(".schedule-select");
