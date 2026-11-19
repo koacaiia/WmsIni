@@ -446,7 +446,42 @@ function buildScheduleFieldHtml(key, label, value) {
 				</label>`;
 }
 
+function buildQuantityRowHtml(pqty, incargo) {
+	const [, eaValue = "", unit = ""] = String(incargo ?? "").match(/^(\d*)([GN]?)$/) ?? [];
+	return `
+				<div class="row-edit-field quantity-field">
+					<label class="quantity-part">
+						<span class="row-edit-label">Pallet</span>
+						<input type="text" inputmode="numeric" class="row-edit-input qty-input" data-key="Pqty" value="${escapeHtml(pqty ?? "")}">
+					</label>
+					<label class="quantity-part">
+						<span class="row-edit-label">Ea</span>
+						<input type="text" inputmode="numeric" class="row-edit-input qty-input" data-key="incargo" value="${escapeHtml(eaValue)}">
+					</label>
+					<div class="incargo-unit-group">
+						<label><input type="radio" name="incargo-unit" value="G"${unit === "G" ? " checked" : ""}> G</label>
+						<label><input type="radio" name="incargo-unit" value="N"${unit === "N" ? " checked" : ""}> N</label>
+					</div>
+				</div>`;
+}
+
+function buildFieldsWithQuantityHtml(getValue) {
+	return Array.from(app.querySelectorAll(".schedule-table thead th[data-key]"))
+		.map((th) => {
+			if (QUANTITY_KEYS.has(th.dataset.key)) {
+				return th.dataset.key === "incargo" ? buildQuantityRowHtml(getValue("Pqty"), getValue("incargo")) : "";
+			}
+			return buildScheduleFieldHtml(th.dataset.key, th.textContent.trim(), getValue(th.dataset.key));
+		})
+		.join("");
+}
+
 function bindScheduleFieldEvents(overlay) {
+	overlay.addEventListener("input", (event) => {
+		if (event.target.matches(".qty-input")) {
+			event.target.value = event.target.value.replace(/\D/g, "");
+		}
+	});
 	overlay.addEventListener("change", (event) => {
 		if (event.target.dataset.key === "consignee") {
 			refreshDescriptionOptions(overlay);
@@ -478,10 +513,15 @@ function collectFormValues(overlay) {
 	if (overlay.querySelector(".spec-field")) {
 		values.spec = readSpecField(overlay);
 	}
+	const unit = overlay.querySelector('input[name="incargo-unit"]:checked');
+	if (overlay.querySelector(".quantity-field") && values.incargo && unit) {
+		values.incargo += unit.value;
+	}
 	return values;
 }
 
 const OPTIONAL_NEW_RECORD_KEYS = new Set(["layout", "remark"]);
+const QUANTITY_KEYS = new Set(["Pqty", "incargo"]);
 
 function openNewRecordPopup() {
 	const fieldHeaders = Array.from(app.querySelectorAll(".schedule-table thead th[data-key]"));
@@ -489,9 +529,7 @@ function openNewRecordPopup() {
 		return;
 	}
 	const today = getTodayDateString();
-	const fieldsHtml = fieldHeaders
-		.map((th) => buildScheduleFieldHtml(th.dataset.key, th.textContent.trim(), th.dataset.key === "date" ? today : ""))
-		.join("");
+	const fieldsHtml = buildFieldsWithQuantityHtml((key) => (key === "date" ? today : ""));
 
 	const overlay = document.createElement("div");
 	overlay.className = "row-edit-overlay new-record-overlay";
@@ -609,7 +647,7 @@ function openNewRecordPopup() {
 				records.map((record) =>
 					set(
 						ref(state.database, buildScheduleRecordPath(record.date, record.consignee, getScheduleNodeKey(record))),
-						buildScheduleNodeValue(record)
+						{ ...buildScheduleNodeValue(record), working: "" }
 					)
 				)
 			);
@@ -1297,6 +1335,9 @@ function getScheduleRecordError(record) {
 	if (/[.#$[\]/]/.test(getScheduleNodeKey(record))) {
 		return "BL·품명·수량에는 . # $ [ ] / 를 사용할 수 없습니다.";
 	}
+	if (record.incargo && !/[GN]$/.test(record.incargo)) {
+		return "Ea 수량을 입력했으면 G/N 중 하나를 선택해 주세요.";
+	}
 	return "";
 }
 
@@ -1384,9 +1425,7 @@ function openScheduleEditPopup(record, sequence) {
 	const title = [data.date, data.consignee, data.container, data.bl, data.spec, data.description]
 		.map((value) => value ?? "")
 		.join("_") + `+(${sequence})`;
-	const fieldsHtml = Array.from(app.querySelectorAll(".schedule-table thead th[data-key]"))
-		.map((th) => buildScheduleFieldHtml(th.dataset.key, th.textContent.trim(), data[th.dataset.key] ?? ""))
-		.join("");
+	const fieldsHtml = buildFieldsWithQuantityHtml((key) => data[key] ?? "");
 
 	const overlay = document.createElement("div");
 	overlay.className = "row-edit-overlay edit-record-overlay";

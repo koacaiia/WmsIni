@@ -80,8 +80,12 @@ body {
 
 .schedule-table th:nth-child(6),
 .schedule-table th:nth-child(8),
+.schedule-table th:nth-child(9),
+.schedule-table th:nth-child(10),
 .schedule-table td:nth-child(6),
-.schedule-table td:nth-child(8) {
+.schedule-table td:nth-child(8),
+.schedule-table td:nth-child(9),
+.schedule-table td:nth-child(10) {
   padding: 4px 2px;
   font-size: 9px;
   line-height: 1.2;
@@ -345,7 +349,7 @@ tbody tr {
 
 .row-edit-body {
   flex: 1 1 auto;
-  padding: 12px 16px;
+  padding: 8px 14px;
   overflow-y: auto;
 }
 
@@ -353,7 +357,7 @@ tbody tr {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   font-size: 0.8em;
 }
 
@@ -370,10 +374,36 @@ tbody tr {
   min-width: 0;
 }
 
+.quantity-field {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr;
+  gap: 8px;
+}
+
+.quantity-part {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.incargo-unit-group {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.incargo-unit-group label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
 .row-edit-input {
   flex: 1 1 auto;
   min-width: 0;
-  height: 30px;
+  height: 26px;
   box-sizing: border-box;
   padding: 0 8px;
   border: 1px solid #5b8fd6;
@@ -400,7 +430,7 @@ tbody tr {
 .row-edit-select {
   flex: 1 1 auto;
   min-width: 0;
-  height: 30px;
+  height: 26px;
   box-sizing: border-box;
   padding: 0 8px;
   border: 1px solid #5b8fd6;
@@ -498,12 +528,12 @@ tbody tr {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 8px 14px;
   border-top: 1px solid #d5dee8;
 }
 
 .row-edit-footer button {
-  height: 30px;
+  height: 26px;
   padding: 0 14px;
   border: 1px solid #9fb2c5;
   border-radius: 4px;
